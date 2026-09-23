@@ -1,0 +1,16 @@
+<%- include('components/header', {title: "Home"}) %>
+
+Hi there! This is the index page.
+
+<% if (items && items.length) { %>
+  <h2>Available Items</h2>
+  <ul>
+    <% items.forEach(item => { %>
+      <li><%= item.name %> - $<%= item.price.toFixed(2) %></li>
+    <% }) %>
+  </ul>
+<% } else { %>
+  <p>No items available at the moment.</p>
+<% } %>
+
+<%- include('components/footer') %>

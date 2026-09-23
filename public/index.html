@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Бічове трелло</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="theme-terracotta">
+  <div class="app-container">
+
+    <!-- Top Navigation & Controls Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-badge">Бічове трелло</div>
+        <h1 id="board-title">Моя дошка</h1>
+        <p class="guide-caption">
+          Перетягувати задачі між колонками може лише <strong>виконавець</strong> · Редагувати або видаляти — лише <strong>автор</strong>
+        </p>
+      </div>
+
+      <div class="header-right">
+        <!-- Workspace Switcher (Slack style) -->
+        <div class="workspace-switcher-wrapper" id="workspace-switcher-wrapper" style="display:none;">
+          <button class="workspace-pill-btn" id="btn-workspace-switch" title="Змінити робоче середовище або вийти в особистий простір">
+            <span class="workspace-icon" id="current-ws-icon">🏢</span>
+            <div class="workspace-pill-text">
+              <span class="workspace-label">ПРОСТІР</span>
+              <span class="workspace-name" id="current-ws-name">Особистий</span>
+            </div>
+            <span class="workspace-caret">▼</span>
+          </button>
+        </div>
+
+        <!-- Theme Selector -->
+        <div class="theme-selector-group">
+          <span class="control-label">ТЕМА</span>
+          <div class="theme-palette-swatches">
+            <button class="theme-swatch terracotta active" data-theme="theme-terracotta" title="Terracotta"></button>
+            <button class="theme-swatch candy" data-theme="theme-candy" title="Candy Pastel"></button>
+            <button class="theme-swatch lavender" data-theme="theme-lavender" title="Lavender Mist"></button>
+            <button class="theme-swatch neutral" data-theme="theme-neutral" title="Soft Neutral"></button>
+          </div>
+        </div>
+
+        <!-- User Profile / Auth Area -->
+        <div id="auth-area" class="auth-area">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </header>
+
+    <!-- STATS & FILTER BAR -->
+    <section class="dashboard-banner">
+      <!-- Left: Completion Ring & Quick Stats -->
+      <div class="completion-widget card">
+        <div class="donut-chart-box">
+          <svg class="donut-svg" viewBox="0 0 100 100">
+            <circle class="donut-meter-bg" cx="50" cy="50" r="40" />
+            <circle class="donut-meter-value" id="completion-meter" cx="50" cy="50" r="40" />
+          </svg>
+          <div class="donut-inner-text">
+            <span class="donut-percentage" id="completion-pct">0%</span>
+          </div>
+        </div>
+        <div class="completion-details">
+          <div class="dash-card-title">ПРОГРЕС ВИКОНАННЯ</div>
+          <div class="completion-subtext" id="completion-summary">0 із 0 задач виконано</div>
+          <div class="difficulty-counts-row">
+            <span class="diff-pill ez" id="count-ez" title="Легко">0 ez</span>
+            <span class="diff-pill mid" id="count-mid" title="Середньо">0 mid</span>
+            <span class="diff-pill oh-fu" id="count-oh-fu" title="Капець складно">0 oh fu..</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Filters & Action -->
+      <div class="filters-widget card">
+        <div class="filters-row">
+          <div class="filter-group">
+            <label for="filter-assignee">Виконавець:</label>
+            <select id="filter-assignee" class="filter-select">
+              <option value="">Усі користувачі</option>
+              <option value="me">Тільки призначені мені</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-tag">Фільтр за тегом:</label>
+            <input type="text" id="filter-tag" class="filter-input" placeholder="Наприклад: frontend...">
+          </div>
+
+          <div class="filter-actions">
+            <button id="btn-create-task" class="btn btn-primary" title="Створити нову задачу">
+              <span class="btn-icon">+</span> Нова задача
+            </button>
+          </div>
+        </div>
+
+        <!-- Tag chips list -->
+        <div class="tag-chips-container" id="tag-chips-container">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- BOARD (3 COLUMNS) -->
+    <main class="kanban-board" id="kanban-board">
+      
+      <!-- 1. TODO COLUMN -->
+      <div class="kanban-column" id="column-todo" data-status="todo">
+        <div class="column-header">
+          <div class="column-title-group">
+            <span class="column-icon">📋</span>
+            <h2 class="column-title">До виконання</h2>
+          </div>
+          <span class="column-count-badge" id="count-col-todo">0</span>
+        </div>
+        <div class="column-dropzone" id="dropzone-todo" data-status="todo">
+          <!-- Task cards -->
+        </div>
+      </div>
+
+      <!-- 2. IN-PROGRESS COLUMN -->
+      <div class="kanban-column" id="column-in-progress" data-status="in-progress">
+        <div class="column-header">
+          <div class="column-title-group">
+            <span class="column-icon">⚡</span>
+            <h2 class="column-title">В процесі</h2>
+          </div>
+          <span class="column-count-badge" id="count-col-in-progress">0</span>
+        </div>
+        <div class="column-dropzone" id="dropzone-in-progress" data-status="in-progress">
+          <!-- Task cards -->
+        </div>
+      </div>
+
+      <!-- 3. DONE COLUMN -->
+      <div class="kanban-column" id="column-done" data-status="done">
+        <div class="column-header">
+          <div class="column-title-group">
+            <span class="column-icon">✅</span>
+            <h2 class="column-title">Виконано</h2>
+          </div>
+          <span class="column-count-badge" id="count-col-done">0</span>
+        </div>
+        <div class="column-dropzone" id="dropzone-done" data-status="done">
+          <!-- Task cards -->
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ==========================================================
+       MODAL: CREATE / EDIT TASK
+       ========================================================== -->
+  <div class="modal-backdrop" id="task-modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="task-modal-title">Створити задачу</h3>
+        <button class="btn-close-modal" id="btn-close-task-modal">&times;</button>
+      </div>
+
+      <form id="task-form" class="modal-form">
+        <input type="hidden" id="task-id-input" value="">
+
+        <div class="form-group">
+          <label for="task-title-input">Назва задачі *</label>
+          <input type="text" id="task-title-input" class="form-input" placeholder="Що потрібно зробити?" required spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label for="task-desc-input">Детальний опис</label>
+          <textarea id="task-desc-input" class="form-textarea" placeholder="Додаткові деталі, посилання чи критерії..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Рівень складності *</label>
+          <div class="difficulty-picker">
+            <label class="diff-option ez">
+              <input type="radio" name="task-difficulty" value="ez" checked>
+              <span>ez</span>
+            </label>
+            <label class="diff-option mid">
+              <input type="radio" name="task-difficulty" value="mid">
+              <span>mid</span>
+            </label>
+            <label class="diff-option oh-fu">
+              <input type="radio" name="task-difficulty" value="oh fu..">
+              <span>oh fu..</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="assignees-header-row">
+            <label>Виконавці *</label>
+            <label class="assign-all-checkbox-label">
+              <input type="checkbox" id="task-assign-all-checkbox">
+              <span>👥 Призначити на всіх</span>
+            </label>
+          </div>
+          <div class="assignees-checklist" id="task-assignees-checklist">
+            <!-- Populated by JS with checkboxes for each user -->
+          </div>
+          <small class="form-hint" id="assignees-hint">Оберіть одного або кількох користувачів (або увімкніть «Призначити на всіх»)</small>
+        </div>
+
+        <div class="form-group">
+          <label for="task-tags-input">Теги (через кому)</label>
+          <input type="text" id="task-tags-input" class="form-input" placeholder="frontend, bug, backend...">
+          <small class="form-hint">Вказуйте через кому, наприклад: ui, mobile, urgent</small>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-task-modal">Скасувати</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-task">Зберегти задачу</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================
+       MODAL: AUTH (LOGIN / REGISTER)
+       ========================================================== -->
+  <div class="modal-backdrop" id="auth-modal-backdrop">
+    <div class="modal-card auth-modal-card">
+      <div class="modal-header">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="tab-login">Вхід</button>
+          <button type="button" class="auth-tab" id="tab-register">Реєстрація</button>
+        </div>
+        <button class="btn-close-modal" id="btn-close-auth-modal">&times;</button>
+      </div>
+
+      <div class="auth-modal-body">
+        <div id="auth-error-msg" class="auth-error" style="display:none;"></div>
+
+        <!-- LOGIN FORM -->
+        <form id="login-form" class="modal-form">
+          <div class="form-group">
+            <label for="login-username">Логін (username)</label>
+            <input type="text" id="login-username" class="form-input" placeholder="username" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="login-password">Пароль</label>
+            <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Увійти</button>
+        </form>
+
+        <!-- REGISTER FORM -->
+        <form id="register-form" class="modal-form" style="display: none;">
+          <div class="form-group">
+            <label for="reg-username">Логін (username) *</label>
+            <input type="text" id="reg-username" class="form-input" placeholder="alisa_dev" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="reg-name">Повне ім'я *</label>
+            <input type="text" id="reg-name" class="form-input" placeholder="Аліса Ковальчук" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-password">Пароль *</label>
+            <input type="password" id="reg-password" class="form-input" placeholder="Мінімум 4 символи" required autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Зареєструватися</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================
+       MODAL: WORKSPACES (SLACK STYLE)
+       ========================================================== -->
+  <div class="modal-backdrop" id="workspace-modal-backdrop">
+    <div class="modal-card workspace-modal-card">
+      <div class="modal-header">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="tab-ws-list">Мої середовища</button>
+          <button type="button" class="auth-tab" id="tab-ws-create">Створити команду</button>
+          <button type="button" class="auth-tab" id="tab-ws-join">Увійти в команду</button>
+        </div>
+        <button class="btn-close-modal" id="btn-close-workspace-modal">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px;">
+        <div id="ws-error-msg" class="auth-error" style="display:none;"></div>
+
+        <!-- VIEW 1: LIST OF WORKSPACES -->
+        <div id="ws-view-list" class="ws-view-panel active">
+          <div class="ws-list-container" id="ws-list-container">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- VIEW 2: CREATE TEAM -->
+        <form id="create-team-form" class="modal-form" style="display:none; padding: 0;">
+          <p class="form-hint" style="margin-bottom: 8px;">
+            Створіть власний корпоративний простір. Колеги зможуть приєднатися до нього, ввівши назву команди та пароль.
+          </p>
+          <div class="form-group">
+            <label for="create-team-name">Назва корпоративної команди *</label>
+            <input type="text" id="create-team-name" class="form-input" placeholder="Наприклад: mycompany" required>
+          </div>
+          <div class="form-group">
+            <label for="create-team-password">Пароль для приєднання колег *</label>
+            <input type="password" id="create-team-password" class="form-input" placeholder="Придумайте пароль" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Створити команду</button>
+        </form>
+
+        <!-- VIEW 3: JOIN TEAM -->
+        <form id="join-team-form" class="modal-form" style="display:none; padding: 0;">
+          <p class="form-hint" style="margin-bottom: 8px;">
+            Увійдіть у корпоративну команду (наприклад, <strong>vinsoft</strong> або <strong>panasonic</strong> з паролем <strong>1111</strong>).
+          </p>
+          <div class="form-group">
+            <label for="join-team-name">Назва команди *</label>
+            <input type="text" id="join-team-name" class="form-input" placeholder="vinsoft або panasonic" required>
+          </div>
+          <div class="form-group">
+            <label for="join-team-password">Пароль команди *</label>
+            <input type="password" id="join-team-password" class="form-input" placeholder="Введіть пароль команди" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Увійти в команду</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATIONS -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/js/main.js"></script>
+</body>
+</html>
