@@ -1797,20 +1797,22 @@ body {
     padding: 12px;
   }
 
-  /* Modals on mobile */
+  /* Modals on mobile - Centered popups */
   .modal-backdrop {
-    padding: 8px;
-    align-items: flex-end;
+    padding: 16px;
+    align-items: center;
+    justify-content: center;
   }
 
   .modal-card {
-    max-height: 92vh;
-    border-radius: 18px 18px 0 0;
+    max-height: 88vh;
+    border-radius: var(--radius-card);
     width: 100%;
-    max-width: 100%;
-    margin: 0;
+    max-width: 500px;
+    margin: auto;
     display: flex;
     flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.24);
   }
 
   .modal-header {
@@ -1844,7 +1846,8 @@ body {
   /* Workspace modal on mobile */
   .workspace-modal-card {
     width: 100%;
-    max-width: 100%;
+    max-width: 500px;
+    border-radius: var(--radius-card);
   }
 
   .auth-tabs {
