@@ -342,6 +342,64 @@
     </div>
   </div>
 
+  <!-- QUICK MOVE TASK MODAL (MOBILE FRIENDLY) -->
+  <div class="modal-backdrop" id="move-task-modal-backdrop" style="display:none;">
+    <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-labelledby="move-task-modal-title">
+      <div class="modal-header">
+        <h3 id="move-task-modal-title">Перемістити задачу</h3>
+        <button class="modal-close-btn" id="btn-close-move-task-modal" aria-label="Закрити">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 18px 20px 22px 20px;">
+        <p id="move-task-modal-name" style="font-weight: 700; color: var(--text-main); margin-bottom: 14px; font-size: 15px; word-break: break-word;"></p>
+        <p class="form-hint" style="margin-bottom: 12px;">Оберіть новий статус для цієї задачі:</p>
+        <div class="move-options-grid">
+          <button type="button" class="btn-move-option" data-status="todo">
+            <span class="mvo-icon">📋</span>
+            <div class="mvo-text">
+              <strong>До виконання</strong>
+              <small>Початкова колонка запланованих задач</small>
+            </div>
+          </button>
+          <button type="button" class="btn-move-option" data-status="in-progress">
+            <span class="mvo-icon">⚡</span>
+            <div class="mvo-text">
+              <strong>В процесі</strong>
+              <small>Задача взята в активну розробку</small>
+            </div>
+          </button>
+          <button type="button" class="btn-move-option" data-status="done">
+            <span class="mvo-icon">✅</span>
+            <div class="mvo-text">
+              <strong>Виконано</strong>
+              <small>Задача успішно завершена</small>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOATING TOUCH DRAG TARGETS (APPEARS ON MOBILE TOUCH DRAG) -->
+  <div id="mobile-drag-targets" class="mobile-drag-targets" aria-hidden="true">
+    <div class="mobile-drag-targets-header">
+      <span>Перетягніть сюди для зміни статусу:</span>
+    </div>
+    <div class="mobile-drag-targets-row">
+      <div class="mobile-drop-target" data-status="todo">
+        <span class="mdt-icon">📋</span>
+        <span class="mdt-title">До викон.</span>
+      </div>
+      <div class="mobile-drop-target" data-status="in-progress">
+        <span class="mdt-icon">⚡</span>
+        <span class="mdt-title">В процесі</span>
+      </div>
+      <div class="mobile-drop-target" data-status="done">
+        <span class="mdt-icon">✅</span>
+        <span class="mdt-title">Виконано</span>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST NOTIFICATIONS -->
   <div id="toast-container" class="toast-container"></div>
 

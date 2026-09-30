@@ -700,13 +700,20 @@ function createTaskCardElement(task) {
     ? task.tags.map(t => `<span class="task-tag-pill" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</span>`).join("")
     : "";
 
-  // Actions for creator (Edit & Delete)
+  // Actions for creator / assignee
   let creatorActionsHtml = "";
   if (isCreator) {
     creatorActionsHtml = `
       <div class="task-actions">
+        ${isAssignee ? `<button class="btn-icon-action move-task-btn" title="Перемістити задачу" aria-label="Move task">⇄</button>` : ""}
         <button class="btn-icon-action edit-task-btn" title="Редагувати задачу" aria-label="Edit task">✏️</button>
         <button class="btn-icon-action delete delete-task-btn" title="Видалити задачу" aria-label="Delete task">🗑️</button>
+      </div>
+    `;
+  } else if (isAssignee) {
+    creatorActionsHtml = `
+      <div class="task-actions">
+        <button class="btn-icon-action move-task-btn" title="Перемістити задачу" aria-label="Move task">⇄</button>
       </div>
     `;
   }
@@ -740,15 +747,38 @@ function createTaskCardElement(task) {
   // Quick move buttons for mobile / touch accessibility
   let quickMovesHtml = "";
   if (isAssignee) {
-    const prevStatus = task.status === "done" ? "in-progress" : task.status === "in-progress" ? "todo" : null;
-    const nextStatus = task.status === "todo" ? "in-progress" : task.status === "in-progress" ? "done" : null;
-
-    quickMovesHtml = `
-      <div class="task-quick-moves">
-        ${prevStatus ? `<button type="button" class="btn-quick-move" data-move-to="${prevStatus}" title="Перемістити назад">◀ ${prevStatus === 'in-progress' ? 'В процесі' : 'До виконання'}</button>` : ""}
-        ${nextStatus ? `<button type="button" class="btn-quick-move" data-move-to="${nextStatus}" title="Перемістити вперед">${nextStatus === 'in-progress' ? 'В процесі' : 'Виконано'} ▶</button>` : ""}
-      </div>
-    `;
+    if (task.status === "todo") {
+      quickMovesHtml = `
+        <div class="task-quick-moves">
+          <button type="button" class="btn-quick-move btn-move-next" data-move-to="in-progress" title="Перемістити в роботу">
+            <span>Взяти в роботу</span>
+            <span class="btn-qm-arrow">⚡ ➔</span>
+          </button>
+        </div>
+      `;
+    } else if (task.status === "in-progress") {
+      quickMovesHtml = `
+        <div class="task-quick-moves dual">
+          <button type="button" class="btn-quick-move btn-move-prev" data-move-to="todo" title="Повернути до виконання">
+            <span class="btn-qm-arrow">◀ 📋</span>
+            <span>До викон.</span>
+          </button>
+          <button type="button" class="btn-quick-move btn-move-done" data-move-to="done" title="Позначити виконаною">
+            <span>Виконано</span>
+            <span class="btn-qm-arrow">✅ ➔</span>
+          </button>
+        </div>
+      `;
+    } else if (task.status === "done") {
+      quickMovesHtml = `
+        <div class="task-quick-moves">
+          <button type="button" class="btn-quick-move btn-move-reopen" data-move-to="in-progress" title="Повернути в роботу">
+            <span class="btn-qm-arrow">◀ ⚡</span>
+            <span>Повернути в роботу</span>
+          </button>
+        </div>
+      `;
+    }
   }
 
   card.innerHTML = `
@@ -775,6 +805,15 @@ function createTaskCardElement(task) {
     </div>
     ${quickMovesHtml}
   `;
+
+  // Bind move modal button
+  const moveBtn = card.querySelector(".move-task-btn");
+  if (moveBtn) {
+    moveBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openMoveTaskModal(task);
+    });
+  }
 
   // Bind edit & delete events
   if (isCreator) {
@@ -845,8 +884,71 @@ function createTaskCardElement(task) {
 }
 
 /* ==========================================================
-   DRAG AND DROP ON COLUMNS
+   TASK STATUS UPDATING & DRAG AND DROP
    ========================================================== */
+
+let currentTaskForMove = null;
+
+function openMoveTaskModal(task) {
+  currentTaskForMove = task;
+  const nameEl = document.getElementById("move-task-modal-name");
+  if (nameEl) {
+    nameEl.textContent = task.title;
+  }
+
+  document.querySelectorAll(".btn-move-option").forEach(btn => {
+    btn.classList.toggle("current-status", btn.dataset.status === task.status);
+  });
+
+  openModal("move-task-modal-backdrop");
+}
+
+async function updateTaskStatus(taskId, targetStatus) {
+  taskId = Number(taskId);
+  const task = allTasks.find(t => t.id === taskId);
+  if (!task) return;
+  if (task.status === targetStatus) return;
+
+  const isAssigned = currentUser && (
+    task.is_all_assignees ||
+    (Array.isArray(task.assignees) && task.assignees.some(a => a.id === currentUser.id)) ||
+    task.assignee_id === currentUser.id
+  );
+
+  if (!isAssigned) {
+    showToast("Переміщувати статус задачі можуть лише призначені виконавці!", "error");
+    return;
+  }
+
+  // Optimistic UI update
+  const prevStatus = task.status;
+  task.status = targetStatus;
+  renderBoard();
+
+  // Backend sync
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: targetStatus })
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      // Revert
+      task.status = prevStatus;
+      renderBoard();
+      showToast(data.error || "Не вдалося змінити статус", "error");
+    } else {
+      const statusLabels = { "todo": "До виконання", "in-progress": "В процесі", "done": "Виконано" };
+      showToast(`Задачу переміщено в «${statusLabels[targetStatus] || targetStatus}»`, "success");
+    }
+  } catch (err) {
+    task.status = prevStatus;
+    renderBoard();
+    showToast("Помилка зв'язку із сервером", "error");
+  }
+}
 
 function setupDragAndDrop() {
   const dropzones = document.querySelectorAll(".column-dropzone");
@@ -871,51 +973,8 @@ function setupDragAndDrop() {
       const targetStatus = dropzone.dataset.status;
       const taskId = Number(draggedTaskId || e.dataTransfer.getData("text/plain"));
 
-      if (!taskId) return;
-
-      const task = allTasks.find(t => t.id === taskId);
-      if (!task) return;
-
-      if (task.status === targetStatus) return; // No change
-
-      // Permission Check: allowed for any assignee or anyone if assigned to all!
-      const isAssigned = currentUser && (
-        task.is_all_assignees ||
-        (Array.isArray(task.assignees) && task.assignees.some(a => a.id === currentUser.id)) ||
-        task.assignee_id === currentUser.id
-      );
-
-      if (!isAssigned) {
-        showToast("Переміщувати статус задачі можуть лише призначені виконавці!", "error");
-        return;
-      }
-
-      // Optimistic UI update
-      const prevStatus = task.status;
-      task.status = targetStatus;
-      renderBoard();
-
-      // Backend sync
-      try {
-        const res = await fetch(`/api/tasks/${taskId}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: targetStatus })
-        });
-
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          // Revert
-          task.status = prevStatus;
-          renderBoard();
-          showToast(data.error || "Не вдалося змінити статус", "error");
-        } else {
-          showToast(`Статус змінено на "${targetStatus}"`, "success");
-        }
-      } catch (err) {
-        task.status = prevStatus;
-        renderBoard();
-        showToast("Помилка зв'язку із сервером", "error");
+      if (taskId && targetStatus) {
+        await updateTaskStatus(taskId, targetStatus);
       }
     });
   });
@@ -1369,6 +1428,22 @@ function setupEventListeners() {
   document.getElementById("filter-assignee")?.addEventListener("change", renderBoard);
   document.getElementById("filter-tag")?.addEventListener("input", renderBoard);
 
+  // Quick Move Task modal events
+  document.getElementById("btn-close-move-task-modal")?.addEventListener("click", () => closeModal("move-task-modal-backdrop"));
+  document.getElementById("move-task-modal-backdrop")?.addEventListener("click", (e) => {
+    if (e.target.id === "move-task-modal-backdrop") closeModal("move-task-modal-backdrop");
+  });
+
+  document.querySelectorAll(".btn-move-option").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const targetStatus = btn.dataset.status;
+      if (currentTaskForMove && targetStatus) {
+        closeModal("move-task-modal-backdrop");
+        await updateTaskStatus(currentTaskForMove.id, targetStatus);
+      }
+    });
+  });
+
   // Setup drag and drop on columns
   setupDragAndDrop();
 }
@@ -1427,10 +1502,44 @@ function initMobileBoardTabs() {
   }, { passive: true });
 }
 
+let dragAutoScrollTimer = null;
+
+function handleDragAutoScroll(clientX) {
+  const board = document.getElementById("kanban-board");
+  if (!board) return;
+
+  const edgeMargin = 70; // px threshold from viewport edges
+  const scrollSpeed = 16;
+
+  if (clientX < edgeMargin) {
+    if (!dragAutoScrollTimer) {
+      dragAutoScrollTimer = setInterval(() => {
+        board.scrollLeft -= scrollSpeed;
+      }, 16);
+    }
+  } else if (clientX > window.innerWidth - edgeMargin) {
+    if (!dragAutoScrollTimer) {
+      dragAutoScrollTimer = setInterval(() => {
+        board.scrollLeft += scrollSpeed;
+      }, 16);
+    }
+  } else {
+    stopDragAutoScroll();
+  }
+}
+
+function stopDragAutoScroll() {
+  if (dragAutoScrollTimer) {
+    clearInterval(dragAutoScrollTimer);
+    dragAutoScrollTimer = null;
+  }
+}
+
 function attachTouchDragEvents(card, task) {
   let touchStartPos = { x: 0, y: 0 };
   let isTouchDragging = false;
   let ghostEl = null;
+  const mobileTargetsBar = document.getElementById("mobile-drag-targets");
 
   card.addEventListener("touchstart", (e) => {
     if (e.target.closest("button") || e.target.closest("input") || e.target.closest(".task-tag-pill")) {
@@ -1447,15 +1556,19 @@ function attachTouchDragEvents(card, task) {
     const dx = touch.clientX - touchStartPos.x;
     const dy = touch.clientY - touchStartPos.y;
 
-    if (!isTouchDragging && (Math.abs(dx) > 14 || Math.abs(dy) > 14)) {
+    if (!isTouchDragging && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) {
       isTouchDragging = true;
       draggedTaskId = task.id;
       card.classList.add("is-dragging");
 
       ghostEl = card.cloneNode(true);
       ghostEl.classList.add("touch-drag-ghost");
-      ghostEl.style.width = `${card.offsetWidth}px`;
+      ghostEl.style.width = `${Math.min(card.offsetWidth, 320)}px`;
       document.body.appendChild(ghostEl);
+
+      if (mobileTargetsBar) {
+        mobileTargetsBar.classList.add("active");
+      }
     }
 
     if (isTouchDragging && ghostEl) {
@@ -1463,16 +1576,37 @@ function attachTouchDragEvents(card, task) {
       ghostEl.style.left = `${touch.clientX - 40}px`;
       ghostEl.style.top = `${touch.clientY - 30}px`;
 
+      // Auto-scroll kanban board horizontally near edges
+      handleDragAutoScroll(touch.clientX);
+
       const elem = document.elementFromPoint(touch.clientX, touch.clientY);
       const dropzone = elem?.closest(".column-dropzone");
+      const mobileTarget = elem?.closest(".mobile-drop-target");
+
       document.querySelectorAll(".column-dropzone").forEach(dz => dz.classList.remove("drag-over"));
-      if (dropzone) {
+      document.querySelectorAll(".mobile-drop-target").forEach(mt => mt.classList.remove("drag-over"));
+
+      if (mobileTarget) {
+        mobileTarget.classList.add("drag-over");
+        const status = mobileTarget.dataset.status;
+        const matchingDz = document.getElementById(`dropzone-${status}`);
+        if (matchingDz) matchingDz.classList.add("drag-over");
+      } else if (dropzone) {
         dropzone.classList.add("drag-over");
+        const status = dropzone.dataset.status;
+        const matchingMt = document.querySelector(`.mobile-drop-target[data-status="${status}"]`);
+        if (matchingMt) matchingMt.classList.add("drag-over");
       }
     }
   }, { passive: false });
 
   card.addEventListener("touchend", async (e) => {
+    stopDragAutoScroll();
+    if (mobileTargetsBar) {
+      mobileTargetsBar.classList.remove("active");
+      document.querySelectorAll(".mobile-drop-target").forEach(mt => mt.classList.remove("drag-over"));
+    }
+
     if (!isTouchDragging) return;
     card.classList.remove("is-dragging");
 
@@ -1484,19 +1618,31 @@ function attachTouchDragEvents(card, task) {
     const touch = e.changedTouches[0];
     const elem = document.elementFromPoint(touch.clientX, touch.clientY);
     const dropzone = elem?.closest(".column-dropzone");
+    const mobileTarget = elem?.closest(".mobile-drop-target");
+
     document.querySelectorAll(".column-dropzone").forEach(dz => dz.classList.remove("drag-over"));
 
-    if (dropzone && draggedTaskId) {
-      const newStatus = dropzone.dataset.status;
-      if (newStatus && newStatus !== task.status) {
-        await updateTaskStatus(task.id, newStatus);
-      }
+    let targetStatus = null;
+    if (mobileTarget) {
+      targetStatus = mobileTarget.dataset.status;
+    } else if (dropzone) {
+      targetStatus = dropzone.dataset.status;
     }
+
+    if (targetStatus && targetStatus !== task.status) {
+      await updateTaskStatus(task.id, targetStatus);
+    }
+
     draggedTaskId = null;
     isTouchDragging = false;
   }, { passive: true });
 
   card.addEventListener("touchcancel", () => {
+    stopDragAutoScroll();
+    if (mobileTargetsBar) {
+      mobileTargetsBar.classList.remove("active");
+      document.querySelectorAll(".mobile-drop-target").forEach(mt => mt.classList.remove("drag-over"));
+    }
     if (ghostEl) {
       ghostEl.remove();
       ghostEl = null;

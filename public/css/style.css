@@ -1551,30 +1551,38 @@ body {
 /* Quick move buttons on cards */
 .task-quick-moves {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  align-items: stretch;
   gap: 6px;
   padding-top: 8px;
-  margin-top: 6px;
+  margin-top: 8px;
   border-top: 1px dashed rgba(0, 0, 0, 0.08);
+  width: 100%;
+}
+
+.task-quick-moves.dual {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 6px;
 }
 
 .btn-quick-move {
   font-size: 11px;
   font-weight: 700;
-  padding: 4px 9px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-input);
   background: var(--bg-page);
   color: var(--text-main);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 5px;
   transition: var(--transition);
   user-select: none;
   font-family: inherit;
   -webkit-tap-highlight-color: transparent;
+  flex: 1;
 }
 
 .btn-quick-move:hover,
@@ -1582,18 +1590,203 @@ body {
   background: var(--accent);
   color: #FFF;
   border-color: var(--accent);
-  transform: scale(1.02);
+  transform: translateY(-1px);
+}
+
+.btn-quick-move.btn-move-next {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--accent);
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.btn-quick-move.btn-move-next:hover,
+.btn-quick-move.btn-move-next:active {
+  background: var(--accent);
+  color: #FFF;
+}
+
+.btn-quick-move.btn-move-done {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.btn-quick-move.btn-move-done:hover,
+.btn-quick-move.btn-move-done:active {
+  background: #10b981;
+  color: #FFF;
+  border-color: #10b981;
+}
+
+.btn-quick-move.btn-move-reopen {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.btn-quick-move.btn-move-reopen:hover,
+.btn-quick-move.btn-move-reopen:active {
+  background: #f59e0b;
+  color: #FFF;
+}
+
+.btn-qm-arrow {
+  font-size: 11px;
 }
 
 /* Touch drag ghost element */
 .touch-drag-ghost {
   position: fixed;
   pointer-events: none;
-  opacity: 0.92;
+  opacity: 0.94;
   z-index: 99999;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
-  transform: rotate(3deg) scale(1.03);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.32);
+  transform: rotate(3deg) scale(1.02);
   transition: transform 0.05s linear;
+}
+
+/* Quick Move Modal Options */
+.move-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-move-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: var(--card-bg);
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition);
+  font-family: inherit;
+  width: 100%;
+}
+
+.btn-move-option:hover,
+.btn-move-option:active {
+  background: var(--bg-page);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.btn-move-option.current-status {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.08);
+  position: relative;
+}
+
+.btn-move-option.current-status::after {
+  content: "Поточний";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--accent);
+  color: #FFF;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.btn-move-option .mvo-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.btn-move-option .mvo-text strong {
+  display: block;
+  font-size: 14px;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.btn-move-option .mvo-text small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+/* Floating Mobile Drag Targets Overlay */
+.mobile-drag-targets {
+  position: fixed;
+  bottom: -150px;
+  left: 0;
+  right: 0;
+  z-index: 99998;
+  background: var(--card-bg);
+  border-top: 3px solid var(--accent);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.28);
+  padding: 10px 14px 18px 14px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: 20px 20px 0 0;
+}
+
+.mobile-drag-targets.active {
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateY(-150px);
+}
+
+.mobile-drag-targets-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-subtle);
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.mobile-drag-targets-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.mobile-drop-target {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 4px;
+  border-radius: 12px;
+  border: 2px dashed var(--border-input);
+  background: var(--bg-page);
+  color: var(--text-main);
+  transition: all 0.15s ease;
+  min-height: 60px;
+}
+
+.mobile-drop-target .mdt-icon {
+  font-size: 22px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.mobile-drop-target .mdt-title {
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mobile-drop-target.drag-over {
+  background: var(--accent);
+  color: #FFF;
+  border-color: #FFF;
+  border-style: solid;
+  transform: scale(1.06);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
 }
 
 /* ==========================================================
@@ -1772,11 +1965,25 @@ body {
   }
 
   .kanban-column {
-    flex: 0 0 88%;
-    max-width: 360px;
+    flex: 0 0 82%;
+    max-width: 330px;
     min-height: 380px;
     scroll-snap-align: center;
     border-radius: 14px;
+  }
+
+  .task-quick-moves {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+
+  .btn-quick-move {
+    padding: 8px 12px;
+    font-size: 12.5px;
+    border-radius: 8px;
+    min-height: 38px;
   }
 
   .column-header {
@@ -1931,6 +2138,6 @@ body {
   }
 
   .kanban-column {
-    flex: 0 0 92%;
+    flex: 0 0 82%;
   }
 }
