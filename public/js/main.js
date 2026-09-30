@@ -22,6 +22,7 @@ let currentTheme = localStorage.getItem("kanban_theme") || "theme-terracotta";
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   setupEventListeners();
+  initMobileBoardTabs();
   await checkAuth();
 });
 
@@ -592,6 +593,8 @@ function renderEmptyBoard() {
     }
     const countBadge = document.getElementById(`count-col-${status}`);
     if (countBadge) countBadge.textContent = "0";
+    const mobCountBadge = document.getElementById(`mob-count-col-${status}`);
+    if (mobCountBadge) mobCountBadge.textContent = "0";
   });
   updateDashboardStats([]);
   renderTagChips([]);
@@ -662,6 +665,8 @@ function renderBoard() {
     }
     const badge = document.getElementById(`count-col-${status}`);
     if (badge) badge.textContent = counts[status];
+    const mobBadge = document.getElementById(`mob-count-col-${status}`);
+    if (mobBadge) mobBadge.textContent = counts[status];
   });
 
   updateDashboardStats(filteredTasks);
@@ -732,6 +737,20 @@ function createTaskCardElement(task) {
     ? `<span class="task-drag-hint can-drag" title="Ви можете перетягувати цю задачу між колонками">⋮⋮ Виконавець (тягни)</span>`
     : `<span class="task-drag-hint locked" title="Переміщувати можуть лише призначені виконавці">🔒 Лише виконавці</span>`;
 
+  // Quick move buttons for mobile / touch accessibility
+  let quickMovesHtml = "";
+  if (isAssignee) {
+    const prevStatus = task.status === "done" ? "in-progress" : task.status === "in-progress" ? "todo" : null;
+    const nextStatus = task.status === "todo" ? "in-progress" : task.status === "in-progress" ? "done" : null;
+
+    quickMovesHtml = `
+      <div class="task-quick-moves">
+        ${prevStatus ? `<button type="button" class="btn-quick-move" data-move-to="${prevStatus}" title="Перемістити назад">◀ ${prevStatus === 'in-progress' ? 'В процесі' : 'До виконання'}</button>` : ""}
+        ${nextStatus ? `<button type="button" class="btn-quick-move" data-move-to="${nextStatus}" title="Перемістити вперед">${nextStatus === 'in-progress' ? 'В процесі' : 'Виконано'} ▶</button>` : ""}
+      </div>
+    `;
+  }
+
   card.innerHTML = `
     <div class="task-top-row">
       <span class="diff-pill ${diffClass}">${escapeHtml(task.difficulty)}</span>
@@ -754,6 +773,7 @@ function createTaskCardElement(task) {
       </div>
       ${dragHintHtml}
     </div>
+    ${quickMovesHtml}
   `;
 
   // Bind edit & delete events
@@ -787,8 +807,20 @@ function createTaskCardElement(task) {
     });
   });
 
-  // DRAG AND DROP EVENTS ON CARD
+  // DRAG AND DROP & QUICK MOVE EVENTS ON CARD
   if (isAssignee) {
+    card.querySelectorAll(".btn-quick-move").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const targetStatus = btn.dataset.moveTo;
+        if (targetStatus) {
+          await updateTaskStatus(task.id, targetStatus);
+        }
+      });
+    });
+
+    attachTouchDragEvents(card, task);
+
     card.addEventListener("dragstart", (e) => {
       draggedTaskId = task.id;
       card.classList.add("is-dragging");
@@ -1339,6 +1371,141 @@ function setupEventListeners() {
 
   // Setup drag and drop on columns
   setupDragAndDrop();
+}
+
+/* ==========================================================
+   MOBILE & TOUCH ENHANCEMENTS
+   ========================================================== */
+
+function initMobileBoardTabs() {
+  const tabs = document.querySelectorAll(".mobile-board-tab");
+  const board = document.getElementById("kanban-board");
+  if (!tabs.length || !board) return;
+
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      const colId = `column-${tab.dataset.col}`;
+      const column = document.getElementById(colId);
+      if (!column) return;
+
+      tabs.forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+
+      column.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    });
+  });
+
+  // Track scroll position to update active tab when user swipes horizontally
+  let scrollTimeout;
+  board.addEventListener("scroll", () => {
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      const boardRect = board.getBoundingClientRect();
+      const boardCenter = boardRect.left + boardRect.width / 2;
+
+      let closestCol = null;
+      let minDistance = Infinity;
+
+      ["todo", "in-progress", "done"].forEach(status => {
+        const col = document.getElementById(`column-${status}`);
+        if (!col) return;
+        const colRect = col.getBoundingClientRect();
+        const colCenter = colRect.left + colRect.width / 2;
+        const dist = Math.abs(boardCenter - colCenter);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestCol = status;
+        }
+      });
+
+      if (closestCol) {
+        tabs.forEach(tab => {
+          tab.classList.toggle("active", tab.dataset.col === closestCol);
+        });
+      }
+    }, 80);
+  }, { passive: true });
+}
+
+function attachTouchDragEvents(card, task) {
+  let touchStartPos = { x: 0, y: 0 };
+  let isTouchDragging = false;
+  let ghostEl = null;
+
+  card.addEventListener("touchstart", (e) => {
+    if (e.target.closest("button") || e.target.closest("input") || e.target.closest(".task-tag-pill")) {
+      return;
+    }
+    const touch = e.touches[0];
+    touchStartPos = { x: touch.clientX, y: touch.clientY };
+    isTouchDragging = false;
+  }, { passive: true });
+
+  card.addEventListener("touchmove", (e) => {
+    if (!e.touches || e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartPos.x;
+    const dy = touch.clientY - touchStartPos.y;
+
+    if (!isTouchDragging && (Math.abs(dx) > 14 || Math.abs(dy) > 14)) {
+      isTouchDragging = true;
+      draggedTaskId = task.id;
+      card.classList.add("is-dragging");
+
+      ghostEl = card.cloneNode(true);
+      ghostEl.classList.add("touch-drag-ghost");
+      ghostEl.style.width = `${card.offsetWidth}px`;
+      document.body.appendChild(ghostEl);
+    }
+
+    if (isTouchDragging && ghostEl) {
+      if (e.cancelable) e.preventDefault();
+      ghostEl.style.left = `${touch.clientX - 40}px`;
+      ghostEl.style.top = `${touch.clientY - 30}px`;
+
+      const elem = document.elementFromPoint(touch.clientX, touch.clientY);
+      const dropzone = elem?.closest(".column-dropzone");
+      document.querySelectorAll(".column-dropzone").forEach(dz => dz.classList.remove("drag-over"));
+      if (dropzone) {
+        dropzone.classList.add("drag-over");
+      }
+    }
+  }, { passive: false });
+
+  card.addEventListener("touchend", async (e) => {
+    if (!isTouchDragging) return;
+    card.classList.remove("is-dragging");
+
+    if (ghostEl) {
+      ghostEl.remove();
+      ghostEl = null;
+    }
+
+    const touch = e.changedTouches[0];
+    const elem = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dropzone = elem?.closest(".column-dropzone");
+    document.querySelectorAll(".column-dropzone").forEach(dz => dz.classList.remove("drag-over"));
+
+    if (dropzone && draggedTaskId) {
+      const newStatus = dropzone.dataset.status;
+      if (newStatus && newStatus !== task.status) {
+        await updateTaskStatus(task.id, newStatus);
+      }
+    }
+    draggedTaskId = null;
+    isTouchDragging = false;
+  }, { passive: true });
+
+  card.addEventListener("touchcancel", () => {
+    if (ghostEl) {
+      ghostEl.remove();
+      ghostEl = null;
+    }
+    card.classList.remove("is-dragging");
+    document.querySelectorAll(".column-dropzone").forEach(dz => dz.classList.remove("drag-over"));
+    isTouchDragging = false;
+    draggedTaskId = null;
+  }, { passive: true });
 }
 
 /* ==========================================================

@@ -104,6 +104,19 @@
       </div>
     </section>
 
+    <!-- MOBILE COLUMN TABS (Visible only on mobile devices) -->
+    <nav class="mobile-board-tabs" id="mobile-board-tabs" aria-label="Вибір колонки">
+      <button class="mobile-board-tab active" data-col="todo" type="button">
+        📋 До виконання (<span id="mob-count-col-todo">0</span>)
+      </button>
+      <button class="mobile-board-tab" data-col="in-progress" type="button">
+        ⚡ В процесі (<span id="mob-count-col-in-progress">0</span>)
+      </button>
+      <button class="mobile-board-tab" data-col="done" type="button">
+        ✅ Виконано (<span id="mob-count-col-done">0</span>)
+      </button>
+    </nav>
+
     <!-- BOARD (3 COLUMNS) -->
     <main class="kanban-board" id="kanban-board">
       
