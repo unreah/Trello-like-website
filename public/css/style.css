@@ -1002,13 +1002,16 @@ body {
   z-index: 999;
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
   transition: opacity 0.2s ease, visibility 0.2s ease;
   padding: 20px;
 }
 
 .modal-backdrop.active {
-  opacity: 1;
-  visibility: visible;
+  display: flex !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
 }
 
 .modal-card {
@@ -1040,13 +1043,18 @@ body {
   font-weight: 700;
 }
 
-.btn-close-modal {
+.btn-close-modal, .modal-close-btn {
   background: transparent;
   border: none;
   font-size: 24px;
   line-height: 1;
   color: var(--text-muted);
   cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.btn-close-modal:hover, .modal-close-btn:hover {
+  color: var(--text-main);
 }
 
 .modal-form {
@@ -1721,6 +1729,19 @@ body {
   background: var(--accent);
   color: #FFF;
   box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.mobile-board-tab.mobile-add-col-tab {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 1px dashed var(--accent);
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.mobile-board-tab.mobile-add-col-tab:hover {
+  background: var(--accent);
+  color: #FFF;
 }
 
 /* Quick move buttons on cards */

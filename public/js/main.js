@@ -772,6 +772,13 @@ function renderBoardColumns() {
         </button>
       `;
     }).join("");
+    if (isAdminOrOwner) {
+      tabsHtml += `
+        <button class="mobile-board-tab mobile-add-col-tab" id="mob-btn-add-column" type="button" title="Додати нову колонку">
+          ➕ Нова колонка
+        </button>
+      `;
+    }
     mobileTabs.innerHTML = tabsHtml;
     initMobileBoardTabs();
   }
@@ -837,11 +844,13 @@ function renderBoardColumns() {
 
   // 6. Bind Column Admin Action Listeners
   if (isAdminOrOwner) {
-    // Add column button
-    document.getElementById("btn-add-column")?.addEventListener("click", () => {
+    // Add column button (desktop board card + mobile tab button)
+    const openAddColHandler = () => {
       document.getElementById("new-column-name-input").value = "";
       openModal("add-column-modal-backdrop");
-    });
+    };
+    document.getElementById("btn-add-column")?.addEventListener("click", openAddColHandler);
+    document.getElementById("mob-btn-add-column")?.addEventListener("click", openAddColHandler);
 
     // Edit column buttons
     board.querySelectorAll(".btn-edit-col").forEach(btn => {
@@ -1668,11 +1677,22 @@ async function deleteTask(taskId) {
    ========================================================== */
 
 function openModal(id) {
-  document.getElementById(id)?.classList.add("active");
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.style.display = "flex";
+  void modal.offsetWidth;
+  modal.classList.add("active");
 }
 
 function closeModal(id) {
-  document.getElementById(id)?.classList.remove("active");
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.classList.remove("active");
+  setTimeout(() => {
+    if (!modal.classList.contains("active")) {
+      modal.style.display = "none";
+    }
+  }, 220);
 }
 
 function openAuthModal() {
@@ -1941,6 +1961,13 @@ function setupEventListeners() {
     }
   });
 
+  // Close any open modal on Escape key
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      document.querySelectorAll(".modal-backdrop.active").forEach(m => closeModal(m.id));
+    }
+  });
+
   // Setup drag and drop on columns
   setupDragAndDrop();
 }
@@ -1956,6 +1983,7 @@ function initMobileBoardTabs() {
 
   tabs.forEach(tab => {
     tab.addEventListener("click", () => {
+      if (tab.id === "mob-btn-add-column") return;
       const colId = `column-${tab.dataset.col}`;
       const column = document.getElementById(colId);
       if (!column) return;

@@ -19,6 +19,7 @@ import {
   removeUserFromTeam,
   deleteTeam,
   getBoardColumns,
+  getBoardColumnById,
   createBoardColumn,
   updateBoardColumn,
   deleteBoardColumn,
@@ -368,12 +369,18 @@ app.post('/api/columns', requireAuth, (req, res) => {
 app.put('/api/columns/:id', requireAuth, (req, res) => {
   try {
     const columnId = Number(req.params.id);
-    const { name, color } = req.body || {};
-    const { teamId } = req.query;
+    const { name, color, teamId: bodyTeamId } = req.body || {};
+    const teamIdParam = req.query.teamId || bodyTeamId;
 
-    if (teamId && teamId !== 'solo') {
-      const tId = Number(teamId);
-      if (!isTeamAdmin(tId, req.user.id)) {
+    const existingCol = getBoardColumnById(columnId);
+    if (!existingCol) {
+      return res.status(404).json({ success: false, error: 'Колонку не знайдено' });
+    }
+
+    const effectiveTeamId = existingCol.team_id !== null ? existingCol.team_id : (teamIdParam && teamIdParam !== 'solo' ? Number(teamIdParam) : null);
+
+    if (effectiveTeamId !== null) {
+      if (!isTeamAdmin(effectiveTeamId, req.user.id)) {
         return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть редагувати колонки' });
       }
     }
@@ -389,11 +396,17 @@ app.put('/api/columns/:id', requireAuth, (req, res) => {
 app.delete('/api/columns/:id', requireAuth, (req, res) => {
   try {
     const columnId = Number(req.params.id);
-    const { teamId } = req.query;
+    const teamIdParam = req.query.teamId;
 
-    if (teamId && teamId !== 'solo') {
-      const tId = Number(teamId);
-      if (!isTeamAdmin(tId, req.user.id)) {
+    const existingCol = getBoardColumnById(columnId);
+    if (!existingCol) {
+      return res.status(404).json({ success: false, error: 'Колонку не знайдено' });
+    }
+
+    const effectiveTeamId = existingCol.team_id !== null ? existingCol.team_id : (teamIdParam && teamIdParam !== 'solo' ? Number(teamIdParam) : null);
+
+    if (effectiveTeamId !== null) {
+      if (!isTeamAdmin(effectiveTeamId, req.user.id)) {
         return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть видаляти колонки' });
       }
     }

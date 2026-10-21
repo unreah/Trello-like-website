@@ -502,6 +502,11 @@ export function getBoardColumns(teamId = null) {
   return cols;
 }
 
+export function getBoardColumnById(columnId) {
+  if (!columnId) return null;
+  return db.prepare('SELECT * FROM board_columns WHERE id = ?').get(Number(columnId));
+}
+
 export function createBoardColumn({ teamId = null, name, color = '' }) {
   const cleanName = (name || '').trim();
   if (!cleanName) {
