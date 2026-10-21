@@ -564,6 +564,24 @@ export function updateBoardColumn(columnId, { name, color }) {
   return db.prepare('SELECT * FROM board_columns WHERE id = ?').get(Number(columnId));
 }
 
+export function reorderBoardColumns({ teamId = null, columnIds = [] }) {
+  const targetTeamId = (teamId && teamId !== 'solo') ? Number(teamId) : null;
+  const updateStmt = db.prepare('UPDATE board_columns SET order_index = ? WHERE id = ?');
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    columnIds.forEach((id, index) => {
+      updateStmt.run(index, Number(id));
+    });
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+
+  return getBoardColumns(targetTeamId);
+}
+
 export function deleteBoardColumn(columnId) {
   const colId = Number(columnId);
   const col = db.prepare('SELECT * FROM board_columns WHERE id = ?').get(colId);

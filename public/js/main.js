@@ -13,6 +13,7 @@ let allUsers = []; // Users available in active workspace
 let allTasks = [];
 let activeTagFilter = "";
 let draggedTaskId = null;
+let draggedColumnId = null;
 let currentTheme = localStorage.getItem("kanban_theme") || "theme-terracotta";
 
 /* ==========================================================
@@ -710,6 +711,12 @@ function renderBoardColumns() {
     if (isAdminOrOwner) {
       adminControls = `
         <div class="column-actions-group">
+          ${idx > 0 ? `
+            <button type="button" class="btn-col-action btn-move-col" onclick="moveColumnDirectly('${col.id}', 'left')" title="Перемістити колонку вліво">◀</button>
+          ` : ''}
+          ${idx < currentColumns.length - 1 ? `
+            <button type="button" class="btn-col-action btn-move-col" onclick="moveColumnDirectly('${col.id}', 'right')" title="Перемістити колонку вправо">▶</button>
+          ` : ''}
           <button type="button" class="btn-col-action btn-edit-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" onclick="openEditColumnModal(this.dataset.colId, this.dataset.colName)" title="Редагувати назву колонки">✏️</button>
           ${currentColumns.length > 1 ? `
             <button type="button" class="btn-col-action btn-delete-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" onclick="handleDeleteColumn(this.dataset.colId, this.dataset.colName)" title="Видалити колонку">🗑️</button>
@@ -732,9 +739,10 @@ function renderBoardColumns() {
     }
 
     columnsHtml += `
-      <div class="kanban-column" id="column-${col.status_key}" data-status="${col.status_key}">
+      <div class="kanban-column" id="column-${col.status_key}" data-status="${col.status_key}" data-col-id="${col.id}">
         <div class="column-header">
           <div class="column-title-group">
+            ${isAdminOrOwner ? `<span class="col-drag-handle" title="Потягніть за заголовок для переміщення колонки">⋮⋮</span>` : ''}
             <span class="column-icon">${icon}</span>
             <h2 class="column-title">${escapeHtml(col.name)}</h2>
           </div>
@@ -797,8 +805,9 @@ function renderBoardColumns() {
     mobileTargetsRow.innerHTML = targetsHtml;
   }
 
-  // 4. Setup Drag & Drop on freshly rendered dropzones
+  // 4. Setup Drag & Drop on freshly rendered dropzones and columns
   setupDragAndDrop();
+  setupColumnDragAndDrop();
 
   // 5. Bind quick add task form listener
   const quickAddForm = document.getElementById("quick-add-task-form");
@@ -1344,6 +1353,9 @@ function setupDragAndDrop() {
 
   dropzones.forEach(dropzone => {
     dropzone.addEventListener("dragover", (e) => {
+      if (draggedColumnId || (e.dataTransfer && e.dataTransfer.types.includes("application/kanban-column"))) {
+        return;
+      }
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       dropzone.classList.add("drag-over");
@@ -1356,6 +1368,9 @@ function setupDragAndDrop() {
     });
 
     dropzone.addEventListener("drop", async (e) => {
+      if (draggedColumnId || (e.dataTransfer && e.dataTransfer.types.includes("application/kanban-column"))) {
+        return;
+      }
       e.preventDefault();
       dropzone.classList.remove("drag-over");
 
@@ -1367,6 +1382,195 @@ function setupDragAndDrop() {
       }
     });
   });
+}
+
+/* ==========================================================
+   COLUMN REORDERING (DRAG & DROP & ARROW BUTTONS)
+   ========================================================== */
+
+function setupColumnDragAndDrop() {
+  const isAdminOrOwner = !currentWorkspace || currentWorkspace.type === "solo" || currentWorkspace.role === "admin" || currentWorkspace.role === "owner";
+  if (!isAdminOrOwner) return;
+
+  const columns = document.querySelectorAll(".kanban-column");
+
+  columns.forEach(colEl => {
+    const colId = colEl.dataset.colId;
+    const header = colEl.querySelector(".column-header");
+    if (!header || !colId) return;
+
+    header.setAttribute("draggable", "true");
+
+    header.addEventListener("dragstart", (e) => {
+      if (e.target.closest("button, input, textarea, a")) {
+        e.preventDefault();
+        return;
+      }
+
+      draggedColumnId = colId;
+      colEl.classList.add("column-dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("application/kanban-column", String(colId));
+      e.dataTransfer.setData("text/plain", `col:${colId}`);
+    });
+
+    header.addEventListener("dragend", () => {
+      colEl.classList.remove("column-dragging");
+      draggedColumnId = null;
+      document.querySelectorAll(".kanban-column").forEach(c => {
+        c.classList.remove("column-dragging", "column-drag-over-left", "column-drag-over-right");
+      });
+    });
+
+    colEl.addEventListener("dragover", (e) => {
+      const isColDrag = draggedColumnId || (e.dataTransfer && e.dataTransfer.types.includes("application/kanban-column"));
+      if (!isColDrag) return;
+
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+
+      const rect = colEl.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      if (e.clientX > midX) {
+        colEl.classList.add("column-drag-over-right");
+        colEl.classList.remove("column-drag-over-left");
+      } else {
+        colEl.classList.add("column-drag-over-left");
+        colEl.classList.remove("column-drag-over-right");
+      }
+    });
+
+    colEl.addEventListener("dragleave", (e) => {
+      if (!colEl.contains(e.relatedTarget)) {
+        colEl.classList.remove("column-drag-over-left", "column-drag-over-right");
+      }
+    });
+
+    colEl.addEventListener("drop", async (e) => {
+      const isColDrag = draggedColumnId || (e.dataTransfer && e.dataTransfer.types.includes("application/kanban-column"));
+      if (!isColDrag) return;
+
+      e.preventDefault();
+      colEl.classList.remove("column-drag-over-left", "column-drag-over-right");
+
+      const sourceId = Number(draggedColumnId || e.dataTransfer.getData("application/kanban-column"));
+      const targetId = Number(colEl.dataset.colId);
+
+      if (!sourceId || !targetId || sourceId === targetId) return;
+
+      const sourceIndex = currentColumns.findIndex(c => Number(c.id) === sourceId);
+      const targetIndex = currentColumns.findIndex(c => Number(c.id) === targetId);
+      if (sourceIndex === -1 || targetIndex === -1) return;
+
+      const rect = colEl.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      const isRight = e.clientX > midX;
+
+      const reordered = [...currentColumns];
+      const [movedCol] = reordered.splice(sourceIndex, 1);
+
+      let insertIndex = reordered.findIndex(c => Number(c.id) === targetId);
+      if (isRight) {
+        insertIndex += 1;
+      }
+      insertIndex = Math.max(0, Math.min(reordered.length, insertIndex));
+      reordered.splice(insertIndex, 0, movedCol);
+
+      reordered.forEach((c, idx) => {
+        c.order_index = idx;
+      });
+
+      currentColumns = reordered;
+      renderBoardColumns();
+      await persistColumnOrder();
+    });
+  });
+
+  // Allow dropping a column onto the add-column-card to move it to the end
+  const addColCard = document.querySelector(".add-column-card");
+  if (addColCard) {
+    addColCard.addEventListener("dragover", (e) => {
+      const isColDrag = draggedColumnId || (e.dataTransfer && e.dataTransfer.types.includes("application/kanban-column"));
+      if (!isColDrag) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    });
+
+    addColCard.addEventListener("drop", async (e) => {
+      const isColDrag = draggedColumnId || (e.dataTransfer && e.dataTransfer.types.includes("application/kanban-column"));
+      if (!isColDrag) return;
+      e.preventDefault();
+      const sourceId = Number(draggedColumnId || e.dataTransfer.getData("application/kanban-column"));
+      if (!sourceId) return;
+
+      const sourceIndex = currentColumns.findIndex(c => Number(c.id) === sourceId);
+      if (sourceIndex === -1 || sourceIndex === currentColumns.length - 1) return;
+
+      const reordered = [...currentColumns];
+      const [movedCol] = reordered.splice(sourceIndex, 1);
+      reordered.push(movedCol);
+
+      reordered.forEach((c, idx) => {
+        c.order_index = idx;
+      });
+
+      currentColumns = reordered;
+      renderBoardColumns();
+      await persistColumnOrder();
+    });
+  }
+}
+
+async function moveColumnDirectly(colId, direction) {
+  const cId = Number(colId);
+  const index = currentColumns.findIndex(c => Number(c.id) === cId);
+  if (index === -1) return;
+
+  const targetIndex = direction === "left" ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+  const reordered = [...currentColumns];
+  const [removed] = reordered.splice(index, 1);
+  reordered.splice(targetIndex, 0, removed);
+
+  reordered.forEach((c, idx) => {
+    c.order_index = idx;
+  });
+  currentColumns = reordered;
+
+  renderBoardColumns();
+  await persistColumnOrder();
+}
+
+async function persistColumnOrder() {
+  if (!currentColumns || currentColumns.length === 0) return;
+
+  const columnIds = currentColumns.map(c => Number(c.id));
+  const teamParam = (currentWorkspace && currentWorkspace.type === "team")
+    ? currentWorkspace.id
+    : "solo";
+
+  try {
+    const res = await fetch("/api/columns/reorder", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamId: teamParam,
+        columnIds
+      })
+    });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.columns)) {
+      currentColumns = data.columns;
+    } else if (!data.success) {
+      showToast(data.error || "Не вдалося зберегти порядок колонок", "error");
+      await loadBoardColumns();
+    }
+  } catch (err) {
+    console.error("Persist column order error:", err);
+    showToast("Помилка зв'язку із сервером при збереженні порядку", "error");
+    await loadBoardColumns();
+  }
 }
 
 /* ==========================================================
@@ -1776,7 +1980,7 @@ function closeModal(id) {
   modal.style.display = "none";
 }
 
-// Expose modal helpers globally to window
+// Expose modal and column helpers globally to window
 window.openModal = openModal;
 window.closeModal = closeModal;
 window.openAddColumnModal = openAddColumnModal;
@@ -1784,6 +1988,9 @@ window.openEditColumnModal = openEditColumnModal;
 window.handleDeleteColumn = handleDeleteColumn;
 window.createColumnDirectly = createColumnDirectly;
 window.editColumnDirectly = editColumnDirectly;
+window.moveColumnDirectly = moveColumnDirectly;
+window.persistColumnOrder = persistColumnOrder;
+window.setupColumnDragAndDrop = setupColumnDragAndDrop;
 
 function openAuthModal() {
   const err = document.getElementById("auth-error-msg");

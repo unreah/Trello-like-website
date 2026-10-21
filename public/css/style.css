@@ -506,14 +506,42 @@ body {
    ========================================================== */
 
 .kanban-board {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
   gap: 20px;
-  align-items: start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 24px;
+  min-height: calc(100vh - 280px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+  -webkit-overflow-scrolling: touch;
 }
 
+.kanban-board::-webkit-scrollbar {
+  height: 8px;
+}
+
+.kanban-board::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.kanban-board::-webkit-scrollbar-thumb {
+  background: var(--border-input);
+  border-radius: 4px;
+}
+
+.kanban-board::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
 
 .kanban-column {
+  flex: 0 0 320px;
+  width: 320px;
+  max-width: 320px;
   background: var(--card-bg);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -522,6 +550,41 @@ body {
   flex-direction: column;
   min-height: 520px;
   overflow: hidden;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* Column Drag and Drop States */
+.kanban-column.column-dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.kanban-column.column-drag-over-left {
+  border-left: 4px solid var(--accent) !important;
+}
+
+.kanban-column.column-drag-over-right {
+  border-right: 4px solid var(--accent) !important;
+}
+
+.col-drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 14px;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.col-drag-handle:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.col-drag-handle:active {
+  cursor: grabbing;
 }
 
 #column-todo { background: var(--col-todo-bg); }
@@ -583,6 +646,17 @@ body {
   opacity: 1;
   background: rgba(0, 0, 0, 0.08);
   transform: scale(1.08);
+}
+
+.btn-col-action.btn-move-col {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 5px;
+  color: var(--text-muted);
+}
+
+.btn-col-action.btn-move-col:hover {
+  color: var(--accent);
 }
 
 /* Inline Quick Add Task Box */

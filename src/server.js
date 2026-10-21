@@ -22,6 +22,7 @@ import {
   getBoardColumnById,
   createBoardColumn,
   updateBoardColumn,
+  reorderBoardColumns,
   deleteBoardColumn,
   getTasks,
   getTaskById,
@@ -370,6 +371,33 @@ app.post('/api/columns', requireAuth, (req, res) => {
     res.json({ success: true, column });
   } catch (err) {
     console.error('Create column error:', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Reorder board columns (PUT /api/columns/reorder must precede /api/columns/:id)
+app.put('/api/columns/reorder', requireAuth, (req, res) => {
+  try {
+    const { teamId, columnIds } = req.body || {};
+    if (!Array.isArray(columnIds) || columnIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'Список колонок обов’язковий' });
+    }
+
+    if (teamId && teamId !== 'solo') {
+      const tId = Number(teamId);
+      if (!isTeamAdmin(tId, req.user.id)) {
+        return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть переміщувати колонки' });
+      }
+    }
+
+    const columns = reorderBoardColumns({
+      teamId: (teamId && teamId !== 'solo') ? teamId : null,
+      columnIds
+    });
+
+    res.json({ success: true, columns });
+  } catch (err) {
+    console.error('Reorder columns error:', err);
     res.status(400).json({ success: false, error: err.message });
   }
 });
