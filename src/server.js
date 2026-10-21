@@ -609,9 +609,15 @@ app.post('/api/settings/theme', requireAuth, (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+// Healthcheck endpoints for Render / container health checks
+app.get('/healthz', (req, res) => res.status(200).send('OK'));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const HOST = '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
+  console.log(`Server listening on http://${HOST}:${PORT}`);
 });
 
 export default app;
