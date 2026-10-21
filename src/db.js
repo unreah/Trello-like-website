@@ -40,17 +40,27 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS team_members (
     team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL DEFAULT 'member',
+    role TEXT NOT NULL DEFAULT 'member', -- 'owner', 'admin', 'member'
     joined_at TEXT NOT NULL,
     PRIMARY KEY (team_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS board_columns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE, -- NULL for solo/personal workspace
+    name TEXT NOT NULL,
+    status_key TEXT NOT NULL,
+    color TEXT DEFAULT '',
+    order_index INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT DEFAULT '',
-    status TEXT NOT NULL CHECK(status IN ('todo', 'in-progress', 'done')),
-    difficulty TEXT NOT NULL CHECK(difficulty IN ('ez', 'mid', 'oh fu..')),
+    status TEXT NOT NULL DEFAULT 'todo',
+    difficulty TEXT NOT NULL DEFAULT 'mid', -- 'low', 'mid', 'high'
     tags TEXT DEFAULT '[]',
     creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -72,19 +82,52 @@ db.exec(`
   );
 `);
 
-// Migrations
+// Migration: Check if tasks table has old restrictive CHECK constraints
 try {
-  db.exec('ALTER TABLE tasks ADD COLUMN is_all_assignees INTEGER NOT NULL DEFAULT 0;');
-} catch (e) {}
+  const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get()?.sql || '';
+  if (tableSql.includes('CHECK(status') || tableSql.includes('CHECK(difficulty')) {
+    // Migrate tasks table to remove check constraints
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.exec(`
+      CREATE TABLE tasks_temp (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'todo',
+        difficulty TEXT NOT NULL DEFAULT 'mid',
+        tags TEXT DEFAULT '[]',
+        creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        is_all_assignees INTEGER NOT NULL DEFAULT 0,
+        team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
 
-try {
-  db.exec('ALTER TABLE tasks ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE;');
-} catch (e) {}
+      INSERT INTO tasks_temp (id, title, description, status, difficulty, tags, creator_id, assignee_id, is_all_assignees, team_id, created_at, updated_at)
+      SELECT id, title, description, status, 
+        CASE 
+          WHEN difficulty = 'ez' THEN 'low'
+          WHEN difficulty = 'oh fu..' THEN 'high'
+          ELSE difficulty 
+        END,
+        tags, creator_id, assignee_id, is_all_assignees, team_id, created_at, updated_at
+      FROM tasks;
 
+      DROP TABLE tasks;
+      ALTER TABLE tasks_temp RENAME TO tasks;
+    `);
+    db.exec('PRAGMA foreign_keys = ON;');
+  }
+} catch (e) {
+  console.warn('Tasks table migration note:', e.message);
+}
+
+// Convert any legacy difficulty values in existing database
 try {
   db.exec(`
-    INSERT OR IGNORE INTO task_assignees (task_id, user_id)
-    SELECT id, assignee_id FROM tasks WHERE assignee_id IS NOT NULL;
+    UPDATE tasks SET difficulty = 'low' WHERE difficulty = 'ez';
+    UPDATE tasks SET difficulty = 'high' WHERE difficulty = 'oh fu..';
   `);
 } catch (e) {}
 
@@ -132,20 +175,8 @@ export function createUser(username, name, password) {
   const getStmt = db.prepare('SELECT id, username, name, created_at FROM users WHERE username = ?');
   const newUser = getStmt.get(cleanUsername);
 
-  // Automatically assign new users alternately to vinsoft or panasonic teams
-  try {
-    const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-    const teamName = (totalUsers % 2 === 1) ? 'vinsoft' : 'panasonic';
-    const team = db.prepare('SELECT id FROM teams WHERE name = ?').get(teamName);
-    if (team) {
-      db.prepare(`
-        INSERT OR IGNORE INTO team_members (team_id, user_id, role, joined_at)
-        VALUES (?, ?, 'member', ?)
-      `).run(team.id, newUser.id, now);
-    }
-  } catch (e) {
-    // ignore
-  }
+  // Note: New users are NOT automatically assigned to any corporate teams.
+  // They start with a clean personal workspace and join or create teams explicitly.
 
   return newUser;
 }
@@ -240,45 +271,6 @@ export function setUserTheme(userId, theme) {
    TEAMS & WORKSPACES HELPERS
    ========================================================== */
 
-export function initPresetTeams() {
-  const presetTeams = [
-    { name: 'vinsoft', password: '1111' },
-    { name: 'panasonic', password: '1111' }
-  ];
-
-  const now = new Date().toISOString();
-  presetTeams.forEach(pt => {
-    const existing = db.prepare('SELECT id FROM teams WHERE name = ?').get(pt.name);
-    if (!existing) {
-      const { hash, salt } = hashPassword(pt.password);
-      db.prepare(`
-        INSERT INTO teams (name, password_hash, salt, created_at)
-        VALUES (?, ?, ?, ?)
-      `).run(pt.name, hash, salt, now);
-    }
-  });
-
-  // Distribute all users across both teams
-  try {
-    const vinsoft = db.prepare('SELECT id FROM teams WHERE name = ?').get('vinsoft');
-    const panasonic = db.prepare('SELECT id FROM teams WHERE name = ?').get('panasonic');
-    const allUsers = db.prepare('SELECT id FROM users ORDER BY id ASC').all();
-
-    allUsers.forEach((u, idx) => {
-      const teamId = (idx % 2 === 0) ? vinsoft.id : panasonic.id;
-      db.prepare(`
-        INSERT OR IGNORE INTO team_members (team_id, user_id, role, joined_at)
-        VALUES (?, ?, 'member', ?)
-      `).run(teamId, u.id, now);
-    });
-  } catch (e) {
-    console.error('Error distributing users across teams:', e);
-  }
-}
-
-// Seed preset teams on load
-initPresetTeams();
-
 export function createTeam(name, password, ownerId) {
   const cleanName = name.trim().toLowerCase();
   if (!cleanName || !password) {
@@ -304,11 +296,14 @@ export function createTeam(name, password, ownerId) {
 
   const teamId = db.prepare('SELECT last_insert_rowid() as id').get().id;
 
-  // Add owner to team members
+  // Add owner to team members as 'owner'
   db.prepare(`
     INSERT INTO team_members (team_id, user_id, role, joined_at)
     VALUES (?, ?, 'owner', ?)
   `).run(teamId, ownerId, now);
+
+  // Initialize default 3 columns for this team
+  initDefaultColumnsForTeam(teamId);
 
   return getTeamById(teamId);
 }
@@ -364,7 +359,13 @@ export function getTeamMembers(teamId) {
     FROM team_members tm
     JOIN users u ON tm.user_id = u.id
     WHERE tm.team_id = ?
-    ORDER BY u.name ASC
+    ORDER BY 
+      CASE tm.role 
+        WHEN 'owner' THEN 1 
+        WHEN 'admin' THEN 2 
+        ELSE 3 
+      END,
+      u.name ASC
   `);
   return stmt.all(teamId);
 }
@@ -379,6 +380,36 @@ export function getTeamRole(teamId, userId) {
   if (!teamId || !userId) return null;
   const row = db.prepare('SELECT role FROM team_members WHERE team_id = ? AND user_id = ?').get(teamId, userId);
   return row ? row.role : null;
+}
+
+export function isTeamAdmin(teamId, userId) {
+  if (!teamId || !userId) return false;
+  const role = getTeamRole(teamId, userId);
+  return role === 'owner' || role === 'admin';
+}
+
+export function updateMemberRole(teamId, targetUserId, newRole) {
+  const tId = Number(teamId);
+  const uId = Number(targetUserId);
+
+  if (!['admin', 'member'].includes(newRole)) {
+    throw new Error("Недійсна роль користувача");
+  }
+
+  const team = getTeamById(tId);
+  if (!team) throw new Error("Команду не знайдено");
+  if (team.owner_id === uId) {
+    throw new Error("Неможливо змінити роль власника команди");
+  }
+
+  const stmt = db.prepare(`
+    UPDATE team_members 
+    SET role = ? 
+    WHERE team_id = ? AND user_id = ?
+  `);
+  stmt.run(newRole, tId, uId);
+
+  return true;
 }
 
 export function removeUserFromTeam(teamId, userId) {
@@ -419,10 +450,150 @@ export function deleteTeam(teamId) {
   // 3. Remove team members
   db.prepare('DELETE FROM team_members WHERE team_id = ?').run(tId);
 
-  // 4. Delete the team itself
+  // 4. Remove custom columns for this team
+  db.prepare('DELETE FROM board_columns WHERE team_id = ?').run(tId);
+
+  // 5. Delete the team itself
   db.prepare('DELETE FROM teams WHERE id = ?').run(tId);
 
   return true;
+}
+
+/* ==========================================================
+   DYNAMIC BOARD COLUMNS HELPERS
+   ========================================================== */
+
+function initDefaultColumnsForTeam(teamId) {
+  const now = new Date().toISOString();
+  const defaultCols = [
+    { name: 'До виконання', status_key: 'todo', order_index: 0 },
+    { name: 'В процесі', status_key: 'in-progress', order_index: 1 },
+    { name: 'Виконано', status_key: 'done', order_index: 2 }
+  ];
+
+  const stmt = db.prepare(`
+    INSERT INTO board_columns (team_id, name, status_key, color, order_index, created_at)
+    VALUES (?, ?, ?, '', ?, ?)
+  `);
+
+  for (const c of defaultCols) {
+    stmt.run(teamId, c.name, c.status_key, c.order_index, now);
+  }
+}
+
+export function getBoardColumns(teamId = null) {
+  const targetTeamId = (teamId && teamId !== 'solo') ? Number(teamId) : null;
+
+  let query = 'SELECT * FROM board_columns WHERE ';
+  if (targetTeamId === null) {
+    query += 'team_id IS NULL ORDER BY order_index ASC, id ASC';
+  } else {
+    query += 'team_id = ? ORDER BY order_index ASC, id ASC';
+  }
+
+  const stmt = db.prepare(query);
+  let cols = targetTeamId === null ? stmt.all() : stmt.all(targetTeamId);
+
+  if (cols.length === 0) {
+    initDefaultColumnsForTeam(targetTeamId);
+    cols = targetTeamId === null ? stmt.all() : stmt.all(targetTeamId);
+  }
+
+  return cols;
+}
+
+export function createBoardColumn({ teamId = null, name, color = '' }) {
+  const cleanName = (name || '').trim();
+  if (!cleanName) {
+    throw new Error('Назва колонки є обов’язковою');
+  }
+
+  const targetTeamId = (teamId && teamId !== 'solo') ? Number(teamId) : null;
+
+  // Generate unique status key
+  const randomSuffix = Math.random().toString(36).substring(2, 7);
+  const slug = cleanName
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яіїєґ]/gi, '-')
+    .substring(0, 15);
+  const statusKey = `col_${slug}_${randomSuffix}`;
+
+  // Get max order_index
+  const maxOrderQuery = targetTeamId === null
+    ? 'SELECT MAX(order_index) as max_order FROM board_columns WHERE team_id IS NULL'
+    : 'SELECT MAX(order_index) as max_order FROM board_columns WHERE team_id = ?';
+  const maxRow = targetTeamId === null
+    ? db.prepare(maxOrderQuery).get()
+    : db.prepare(maxOrderQuery).get(targetTeamId);
+  const nextOrder = (maxRow?.max_order ?? -1) + 1;
+
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT INTO board_columns (team_id, name, status_key, color, order_index, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(targetTeamId, cleanName, statusKey, color || '', nextOrder, now);
+
+  const colId = db.prepare('SELECT last_insert_rowid() as id').get().id;
+  return db.prepare('SELECT * FROM board_columns WHERE id = ?').get(colId);
+}
+
+export function updateBoardColumn(columnId, { name, color }) {
+  const col = db.prepare('SELECT * FROM board_columns WHERE id = ?').get(Number(columnId));
+  if (!col) {
+    throw new Error('Колонку не знайдено');
+  }
+
+  const cleanName = name !== undefined ? name.trim() : col.name;
+  if (!cleanName) {
+    throw new Error('Назва колонки не може бути порожньою');
+  }
+  const cleanColor = color !== undefined ? color : col.color;
+
+  db.prepare(`
+    UPDATE board_columns 
+    SET name = ?, color = ? 
+    WHERE id = ?
+  `).run(cleanName, cleanColor, Number(columnId));
+
+  return db.prepare('SELECT * FROM board_columns WHERE id = ?').get(Number(columnId));
+}
+
+export function deleteBoardColumn(columnId) {
+  const colId = Number(columnId);
+  const col = db.prepare('SELECT * FROM board_columns WHERE id = ?').get(colId);
+  if (!col) {
+    throw new Error('Колонку не знайдено');
+  }
+
+  // Check remaining count of columns
+  const allCols = getBoardColumns(col.team_id);
+  if (allCols.length <= 1) {
+    throw new Error('Неможливо видалити останню колонку на дошці');
+  }
+
+  // Find a fallback column
+  const fallbackCol = allCols.find(c => c.id !== colId) || allCols[0];
+
+  // Move any tasks in this column to fallback column
+  if (col.team_id === null) {
+    db.prepare(`
+      UPDATE tasks 
+      SET status = ?, updated_at = ? 
+      WHERE team_id IS NULL AND status = ?
+    `).run(fallbackCol.status_key, new Date().toISOString(), col.status_key);
+  } else {
+    db.prepare(`
+      UPDATE tasks 
+      SET status = ?, updated_at = ? 
+      WHERE team_id = ? AND status = ?
+    `).run(fallbackCol.status_key, new Date().toISOString(), col.team_id, col.status_key);
+  }
+
+  // Delete the column
+  db.prepare('DELETE FROM board_columns WHERE id = ?').run(colId);
+
+  return { success: true, fallbackStatus: fallbackCol.status_key };
 }
 
 /* ==========================================================
@@ -436,6 +607,23 @@ export function isUserAssigned(task, userId) {
     return task.assignees.some(a => Number(a.id) === Number(userId));
   }
   if (task.assignee_id && Number(task.assignee_id) === Number(userId)) return true;
+  return false;
+}
+
+export function canUserManageTask(task, userId) {
+  if (!task || !userId) return false;
+  const uId = Number(userId);
+  if (task.creator_id === uId) return true;
+  if (task.team_id && isTeamAdmin(task.team_id, uId)) return true;
+  return false;
+}
+
+export function canUserMoveTask(task, userId) {
+  if (!task || !userId) return false;
+  const uId = Number(userId);
+  if (isUserAssigned(task, uId)) return true;
+  if (task.creator_id === uId) return true;
+  if (task.team_id && isTeamAdmin(task.team_id, uId)) return true;
   return false;
 }
 
@@ -453,7 +641,6 @@ export function getTasks({ teamId, userId, assigneeId, tag } = {}) {
 
   // Filter by Workspace/Team
   if (teamId === 'solo' || teamId === null || teamId === undefined || teamId === '') {
-    // Solo / Personal tasks: team_id IS NULL, and visible only to creator/assignee
     query += ' AND t.team_id IS NULL';
     if (userId) {
       query += ` AND (
@@ -464,7 +651,6 @@ export function getTasks({ teamId, userId, assigneeId, tag } = {}) {
       params.push(Number(userId), Number(userId), Number(userId));
     }
   } else {
-    // Corporate team tasks
     query += ' AND t.team_id = ?';
     params.push(Number(teamId));
   }
@@ -484,7 +670,7 @@ export function getTasks({ teamId, userId, assigneeId, tag } = {}) {
   const stmt = db.prepare(query);
   const rows = stmt.all(...params);
 
-  // Fetch all assignees for all tasks
+  // Fetch all assignees for tasks
   const assigneesStmt = db.prepare(`
     SELECT ta.task_id, u.id, u.username, u.name
     FROM task_assignees ta
@@ -507,8 +693,15 @@ export function getTasks({ teamId, userId, assigneeId, tag } = {}) {
       } catch (e) {
         parsedTags = [];
       }
+
+      // Normalize difficulty to low / mid / high
+      let diff = row.difficulty;
+      if (diff === 'ez') diff = 'low';
+      if (diff === 'oh fu..') diff = 'high';
+
       return {
         ...row,
+        difficulty: diff,
         tags: Array.isArray(parsedTags) ? parsedTags : [],
         is_all_assignees: Boolean(row.is_all_assignees),
         assignees: assigneesByTaskId[row.id] || []
@@ -551,8 +744,13 @@ export function getTaskById(id) {
   `);
   const assignees = assigneesStmt.all(id);
 
+  let diff = row.difficulty;
+  if (diff === 'ez') diff = 'low';
+  if (diff === 'oh fu..') diff = 'high';
+
   return {
     ...row,
+    difficulty: diff,
     tags: Array.isArray(parsedTags) ? parsedTags : [],
     is_all_assignees: Boolean(row.is_all_assignees),
     assignees
@@ -561,7 +759,7 @@ export function getTaskById(id) {
 
 export function createTask({
   title,
-  description,
+  description = '',
   status = 'todo',
   difficulty = 'mid',
   tags = [],
@@ -582,12 +780,12 @@ export function createTask({
   if (!cleanTitle) {
     throw new Error('Назва задачі обов’язкова');
   }
-  if (!['todo', 'in-progress', 'done'].includes(status)) {
-    status = 'todo';
-  }
-  if (!['ez', 'mid', 'oh fu..'].includes(difficulty)) {
-    difficulty = 'mid';
-  }
+
+  // Normalize difficulty
+  let normalizedDiff = 'mid';
+  if (difficulty === 'low' || difficulty === 'ez') normalizedDiff = 'low';
+  else if (difficulty === 'high' || difficulty === 'oh fu..' || difficulty === 'critical') normalizedDiff = 'high';
+  else normalizedDiff = 'mid';
 
   const tagsJson = JSON.stringify(
     Array.isArray(tags)
@@ -604,7 +802,7 @@ export function createTask({
     INSERT INTO tasks (title, description, status, difficulty, tags, creator_id, assignee_id, is_all_assignees, team_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(cleanTitle, description || '', status, difficulty, tagsJson, actualCreatorId, primaryAssigneeId, isAll, targetTeamId, now, now);
+  stmt.run(cleanTitle, description || '', status || 'todo', normalizedDiff, tagsJson, actualCreatorId, primaryAssigneeId, isAll, targetTeamId, now, now);
 
   const lastIdStmt = db.prepare('SELECT last_insert_rowid() as id');
   const lastId = lastIdStmt.get().id;
@@ -639,7 +837,14 @@ export function updateTask(id, {
     throw new Error('Назва задачі не може бути порожньою');
   }
   const newDesc = description !== undefined ? description : task.description;
-  const newDiff = ['ez', 'mid', 'oh fu..'].includes(difficulty) ? difficulty : task.difficulty;
+
+  let newDiff = task.difficulty;
+  if (difficulty) {
+    if (difficulty === 'low' || difficulty === 'ez') newDiff = 'low';
+    else if (difficulty === 'high' || difficulty === 'oh fu..' || difficulty === 'critical') newDiff = 'high';
+    else newDiff = 'mid';
+  }
+
   const newIsAll = isAllAssignees !== undefined ? (isAllAssignees ? 1 : 0) : (task.is_all_assignees ? 1 : 0);
   const newTags = tags !== undefined
     ? JSON.stringify(Array.isArray(tags) ? tags.map(t => String(t).trim()).filter(Boolean) : [])
@@ -665,7 +870,7 @@ export function updateTask(id, {
 }
 
 export function updateTaskStatus(id, status) {
-  if (!['todo', 'in-progress', 'done'].includes(status)) {
+  if (!status || !status.trim()) {
     throw new Error('Недійсний статус задачі');
   }
   const now = new Date().toISOString();
@@ -674,13 +879,28 @@ export function updateTaskStatus(id, status) {
     SET status = ?, updated_at = ?
     WHERE id = ?
   `);
-  stmt.run(status, now, id);
+  stmt.run(status.trim(), now, id);
   return getTaskById(id);
 }
 
 export function deleteTask(id) {
   const stmt = db.prepare('DELETE FROM tasks WHERE id = ?');
   stmt.run(id);
+}
+
+export function cleanDatabase() {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec(`
+    DELETE FROM sessions;
+    DELETE FROM task_assignees;
+    DELETE FROM tasks;
+    DELETE FROM board_columns;
+    DELETE FROM team_members;
+    DELETE FROM teams;
+    DELETE FROM user_settings;
+    DELETE FROM users;
+  `);
+  db.exec('PRAGMA foreign_keys = ON;');
 }
 
 export default db;

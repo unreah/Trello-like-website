@@ -14,15 +14,23 @@ import {
   getTeamById,
   isUserInTeam,
   getTeamRole,
+  isTeamAdmin,
+  updateMemberRole,
   removeUserFromTeam,
   deleteTeam,
+  getBoardColumns,
+  createBoardColumn,
+  updateBoardColumn,
+  deleteBoardColumn,
   getTasks,
   getTaskById,
   createTask,
   updateTask,
   updateTaskStatus,
   deleteTask,
-  isUserAssigned
+  isUserAssigned,
+  canUserManageTask,
+  canUserMoveTask
 } from './db.js';
 
 const app = express();
@@ -142,7 +150,7 @@ app.get('/api/users', requireAuth, (req, res) => {
 });
 
 /* ==========================================================
-   TEAMS & WORKSPACES ROUTES (SLACK STYLE)
+   TEAMS & WORKSPACES ROUTES
    ========================================================== */
 
 app.get('/api/teams', requireAuth, (req, res) => {
@@ -190,14 +198,43 @@ app.get('/api/teams/:id/members', requireAuth, (req, res) => {
       return res.status(403).json({ success: false, error: 'Ви не є учасником цієї команди' });
     }
     const members = getTeamMembers(teamId);
-    res.json({ success: true, members });
+    const myRole = getTeamRole(teamId, req.user.id);
+    res.json({ success: true, members, myRole });
   } catch (err) {
     console.error('Get team members error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Leave team (for regular members)
+// Change member role: owner only (promote to admin or demote to member)
+app.patch('/api/teams/:id/members/:userId/role', requireAuth, (req, res) => {
+  try {
+    const teamId = Number(req.params.id);
+    const targetUserId = Number(req.params.userId);
+    const { role } = req.body || {};
+
+    const requesterRole = getTeamRole(teamId, req.user.id);
+    if (requesterRole !== 'owner') {
+      return res.status(403).json({ success: false, error: 'Тільки власник дошки може призначати та знімати адміністраторів' });
+    }
+
+    if (targetUserId === req.user.id) {
+      return res.status(400).json({ success: false, error: 'Неможливо змінити роль власника' });
+    }
+
+    if (!isUserInTeam(teamId, targetUserId)) {
+      return res.status(404).json({ success: false, error: 'Користувача немає в цій команді' });
+    }
+
+    updateMemberRole(teamId, targetUserId, role);
+    res.json({ success: true, message: `Роль користувача успішно оновлено на "${role === 'admin' ? 'Адміністратор' : 'Учасник'}"` });
+  } catch (err) {
+    console.error('Update member role error:', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Leave team (for regular members & admins, but not owner)
 app.post('/api/teams/:id/leave', requireAuth, (req, res) => {
   try {
     const teamId = Number(req.params.id);
@@ -221,19 +258,29 @@ app.post('/api/teams/:id/leave', requireAuth, (req, res) => {
   }
 });
 
-// Remove/kick a user from team (owner only)
+// Remove/kick a user from team (owner & admins)
 app.delete('/api/teams/:id/members/:userId', requireAuth, (req, res) => {
   try {
     const teamId = Number(req.params.id);
     const targetUserId = Number(req.params.userId);
 
     const requesterRole = getTeamRole(teamId, req.user.id);
-    if (requesterRole !== 'owner') {
-      return res.status(403).json({ success: false, error: 'Тільки власник команди може видаляти учасників' });
+    if (requesterRole !== 'owner' && requesterRole !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть видаляти учасників' });
     }
 
     if (targetUserId === req.user.id) {
-      return res.status(400).json({ success: false, error: 'Власник не може видалити самого себе з команди' });
+      return res.status(400).json({ success: false, error: 'Ви не можете видалити самого себе через цю дію' });
+    }
+
+    const targetRole = getTeamRole(teamId, targetUserId);
+    if (targetRole === 'owner') {
+      return res.status(403).json({ success: false, error: 'Неможливо видалити власника дошки' });
+    }
+
+    // Admins cannot remove other admins
+    if (requesterRole === 'admin' && targetRole === 'admin') {
+      return res.status(403).json({ success: false, error: 'Адміністратор не може видаляти іншого адміністратора' });
     }
 
     if (!isUserInTeam(teamId, targetUserId)) {
@@ -271,10 +318,98 @@ app.delete('/api/teams/:id', requireAuth, (req, res) => {
 });
 
 /* ==========================================================
-   TASKS ROUTES (WITH WORKSPACE & PERMISSION CHECKS)
+   BOARD COLUMNS ROUTES (DYNAMIC COLUMNS)
    ========================================================== */
 
-// Get tasks for active workspace (teamId or 'solo')
+app.get('/api/columns', requireAuth, (req, res) => {
+  try {
+    const { teamId } = req.query;
+    if (teamId && teamId !== 'solo') {
+      const tId = Number(teamId);
+      if (!isUserInTeam(tId, req.user.id)) {
+        return res.status(403).json({ success: false, error: 'Доступ до цієї дошки заборонено' });
+      }
+    }
+    const columns = getBoardColumns(teamId === 'solo' ? null : teamId);
+    res.json({ success: true, columns });
+  } catch (err) {
+    console.error('Get columns error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/columns', requireAuth, (req, res) => {
+  try {
+    const { teamId, name, color } = req.body || {};
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Назва колонки обов’язкова' });
+    }
+
+    if (teamId && teamId !== 'solo') {
+      const tId = Number(teamId);
+      if (!isTeamAdmin(tId, req.user.id)) {
+        return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть додавати колонки' });
+      }
+    }
+
+    const column = createBoardColumn({
+      teamId: teamId === 'solo' ? null : teamId,
+      name,
+      color
+    });
+
+    res.json({ success: true, column });
+  } catch (err) {
+    console.error('Create column error:', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/columns/:id', requireAuth, (req, res) => {
+  try {
+    const columnId = Number(req.params.id);
+    const { name, color } = req.body || {};
+    const { teamId } = req.query;
+
+    if (teamId && teamId !== 'solo') {
+      const tId = Number(teamId);
+      if (!isTeamAdmin(tId, req.user.id)) {
+        return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть редагувати колонки' });
+      }
+    }
+
+    const column = updateBoardColumn(columnId, { name, color });
+    res.json({ success: true, column });
+  } catch (err) {
+    console.error('Update column error:', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/columns/:id', requireAuth, (req, res) => {
+  try {
+    const columnId = Number(req.params.id);
+    const { teamId } = req.query;
+
+    if (teamId && teamId !== 'solo') {
+      const tId = Number(teamId);
+      if (!isTeamAdmin(tId, req.user.id)) {
+        return res.status(403).json({ success: false, error: 'Тільки адміністратори або власник можуть видаляти колонки' });
+      }
+    }
+
+    const result = deleteBoardColumn(columnId);
+    res.json({ success: true, message: 'Колонку успішно видалено', fallbackStatus: result.fallbackStatus });
+  } catch (err) {
+    console.error('Delete column error:', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/* ==========================================================
+   TASKS ROUTES (WITH WORKSPACE & ADMIN PERMISSIONS)
+   ========================================================== */
+
 app.get('/api/tasks', requireAuth, (req, res) => {
   try {
     const { teamId, assigneeId, tag } = req.query;
@@ -299,7 +434,6 @@ app.get('/api/tasks', requireAuth, (req, res) => {
   }
 });
 
-// Create task: in team workspace or solo
 app.post('/api/tasks', requireAuth, (req, res) => {
   try {
     const { title, description, status, difficulty, tags, assigneeIds, assigneeId, isAllAssignees, teamId } = req.body || {};
@@ -326,7 +460,7 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
     const task = createTask({
       title,
-      description,
+      description: description || '',
       status: status || 'todo',
       difficulty: difficulty || 'mid',
       tags: tags || [],
@@ -343,7 +477,7 @@ app.post('/api/tasks', requireAuth, (req, res) => {
   }
 });
 
-// Edit task: only creator can edit
+// Edit task: creator OR workspace admin/owner
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
     const taskId = Number(req.params.id);
@@ -352,10 +486,10 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
       return res.status(404).json({ success: false, error: 'Задачу не знайдено' });
     }
 
-    if (existing.creator_id !== req.user.id) {
+    if (!canUserManageTask(existing, req.user.id)) {
       return res.status(403).json({
         success: false,
-        error: 'Редагування дозволено лише для задач, які ви створили!'
+        error: 'Редагування дозволено автору задачі або адміністраторам дошки!'
       });
     }
 
@@ -383,7 +517,7 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
   }
 });
 
-// Update task status (Drag & Drop): allowed for any assignee or anyone if assigned to all!
+// Update task status (Drag & Drop or Quick Move): allowed for assignee, creator, or workspace admin/owner
 app.patch('/api/tasks/:id/status', requireAuth, (req, res) => {
   try {
     const taskId = Number(req.params.id);
@@ -392,15 +526,15 @@ app.patch('/api/tasks/:id/status', requireAuth, (req, res) => {
       return res.status(404).json({ success: false, error: 'Задачу не знайдено' });
     }
 
-    if (!isUserAssigned(existing, req.user.id)) {
+    if (!canUserMoveTask(existing, req.user.id)) {
       return res.status(403).json({
         success: false,
-        error: 'Редагувати статус (переміщувати між колонками) може лише призначений виконавець або будь-хто, якщо задача для всіх!'
+        error: 'Переміщувати задачу можуть призначені виконавці, автор або адміністратори дошки!'
       });
     }
 
     const { status } = req.body || {};
-    if (!['todo', 'in-progress', 'done'].includes(status)) {
+    if (!status || !status.trim()) {
       return res.status(400).json({ success: false, error: 'Недійсний статус' });
     }
 
@@ -412,7 +546,7 @@ app.patch('/api/tasks/:id/status', requireAuth, (req, res) => {
   }
 });
 
-// Delete task: only creator can delete
+// Delete task: creator OR workspace admin/owner
 app.delete('/api/tasks/:id', requireAuth, (req, res) => {
   try {
     const taskId = Number(req.params.id);
@@ -421,10 +555,10 @@ app.delete('/api/tasks/:id', requireAuth, (req, res) => {
       return res.status(404).json({ success: false, error: 'Задачу не знайдено' });
     }
 
-    if (existing.creator_id !== req.user.id) {
+    if (!canUserManageTask(existing, req.user.id)) {
       return res.status(403).json({
         success: false,
-        error: 'Видалення дозволено лише для задач, які ви створили!'
+        error: 'Видалення дозволено автору задачі або адміністраторам дошки!'
       });
     }
 

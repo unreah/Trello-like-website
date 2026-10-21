@@ -1,14 +1,14 @@
 /**
- * Trello-style Kanban Planner Application with Slack-like Workspaces
- * Supports personal spaces, corporate teams (vinsoft, panasonic),
- * multi-assignees, drag & drop, difficulty levels (ez, mid, oh fu..),
- * role-based permissions, tags and filters.
+ * Kanban Pro — Professional Kanban Platform with Workspace Management,
+ * Dynamic Columns, Administrator Roles, Role Permissions, Multi-User Assignment,
+ * and Priority Tracking.
  */
 
 // Global State
 let currentUser = null;
 let userTeams = [];
-let currentWorkspace = null; // { type: 'solo'|'team', id: number|null, name: string }
+let currentWorkspace = null; // { type: 'solo'|'team', id: number|null, name: string, role?: string }
+let currentColumns = []; // Dynamic columns for active board
 let allUsers = []; // Users available in active workspace
 let allTasks = [];
 let activeTagFilter = "";
@@ -123,6 +123,7 @@ async function logout() {
   currentUser = null;
   userTeams = [];
   currentWorkspace = null;
+  currentColumns = [];
   allTasks = [];
   allUsers = [];
   document.getElementById("workspace-switcher-wrapper").style.display = "none";
@@ -141,21 +142,17 @@ async function initWorkspaces() {
 
   const savedWs = localStorage.getItem("active_workspace");
   if (savedWs === "solo") {
-    currentWorkspace = { type: "solo", id: null, name: "Особистий простір" };
+    currentWorkspace = { type: "solo", id: null, name: "Особистий простір", role: "owner" };
   } else if (savedWs) {
     const matchedTeam = userTeams.find(t => String(t.id) === String(savedWs));
     if (matchedTeam) {
-      currentWorkspace = { type: "team", id: matchedTeam.id, name: matchedTeam.name };
+      currentWorkspace = { type: "team", id: matchedTeam.id, name: matchedTeam.name, role: matchedTeam.role };
     }
   }
 
-  // If no saved preference, check if user has teams
+  // If no saved preference, default to solo workspace
   if (!currentWorkspace) {
-    if (userTeams.length > 0) {
-      currentWorkspace = { type: "team", id: userTeams[0].id, name: userTeams[0].name };
-    } else {
-      currentWorkspace = { type: "solo", id: null, name: "Особистий простір" };
-    }
+    currentWorkspace = { type: "solo", id: null, name: "Особистий простір", role: "owner" };
   }
 
   updateWorkspaceHeader();
@@ -178,6 +175,7 @@ function updateWorkspaceHeader() {
   const wrapper = document.getElementById("workspace-switcher-wrapper");
   const iconEl = document.getElementById("current-ws-icon");
   const nameEl = document.getElementById("current-ws-name");
+  const boardTitle = document.getElementById("board-title");
 
   if (!wrapper || !currentWorkspace) return;
   wrapper.style.display = "flex";
@@ -185,14 +183,25 @@ function updateWorkspaceHeader() {
   if (currentWorkspace.type === "solo") {
     iconEl.innerText = "👤";
     nameEl.innerText = "Особистий";
+    if (boardTitle) boardTitle.innerText = "Особиста дошка";
   } else {
     iconEl.innerText = "🏢";
     nameEl.innerText = currentWorkspace.name;
+    if (boardTitle) boardTitle.innerText = `Дошка: ${currentWorkspace.name}`;
   }
 }
 
 async function switchWorkspace(ws, notify = true) {
   currentWorkspace = ws;
+
+  // Resolve role in team
+  if (ws.type === "team") {
+    const matchedTeam = userTeams.find(t => t.id === ws.id);
+    currentWorkspace.role = matchedTeam ? matchedTeam.role : "member";
+  } else {
+    currentWorkspace.role = "owner";
+  }
+
   localStorage.setItem("active_workspace", ws.type === "team" ? ws.id : "solo");
   updateWorkspaceHeader();
 
@@ -205,6 +214,9 @@ async function switchWorkspace(ws, notify = true) {
       const data = await res.json();
       if (data.success) {
         allUsers = data.members || [];
+        if (data.myRole) {
+          currentWorkspace.role = data.myRole;
+        }
       } else {
         allUsers = [currentUser];
       }
@@ -214,6 +226,7 @@ async function switchWorkspace(ws, notify = true) {
   }
 
   populateAssigneeOptions();
+  await loadBoardColumns();
   await loadTasks();
 
   if (notify) {
@@ -247,7 +260,18 @@ function renderWorkspaceList() {
   let teamsHtml = userTeams.map(t => {
     const isTeamActive = currentWorkspace?.type === "team" && currentWorkspace?.id === t.id;
     const isOwner = t.role === "owner";
+    const isAdmin = t.role === "admin";
     const membersWord = formatMembersCount(t.member_count);
+
+    let roleBadge = "Учасник";
+    let roleClass = "";
+    if (isOwner) {
+      roleBadge = "👑 Власник";
+      roleClass = "owner";
+    } else if (isAdmin) {
+      roleBadge = "⭐ Адмін";
+      roleClass = "admin";
+    }
 
     return `
       <div class="ws-card ${isTeamActive ? 'active' : ''}" id="ws-card-${t.id}">
@@ -257,8 +281,8 @@ function renderWorkspaceList() {
             <div class="ws-card-info">
               <div class="ws-card-title-row">
                 <span class="ws-card-title">Команда ${escapeHtml(t.name)}</span>
-                <span class="ws-role-pill ${isOwner ? 'owner' : ''}">
-                  ${isOwner ? '👑 Власник' : 'Учасник'}
+                <span class="ws-role-pill ${roleClass}">
+                  ${roleBadge}
                 </span>
               </div>
               <div class="ws-card-subtitle">
@@ -272,10 +296,10 @@ function renderWorkspaceList() {
         </div>
 
         <div class="ws-card-actions">
+          <button type="button" class="btn-ws-subaction btn-manage-members" data-id="${t.id}" data-name="${escapeHtml(t.name)}" title="Переглянути список учасників">
+            👥 Учасники (${t.member_count})
+          </button>
           ${isOwner ? `
-            <button type="button" class="btn-ws-subaction btn-manage-members" data-id="${t.id}" data-name="${escapeHtml(t.name)}" title="Переглянути та видалити учасників">
-              👥 Учасники (${t.member_count})
-            </button>
             <button type="button" class="btn-ws-subaction danger btn-delete-team" data-id="${t.id}" data-name="${escapeHtml(t.name)}" title="Видалити корпоративне середовище">
               🗑️ Видалити команду
             </button>
@@ -322,7 +346,7 @@ function renderWorkspaceList() {
     cardMain.addEventListener("click", async () => {
       const type = cardMain.dataset.type;
       if (type === "solo") {
-        await switchWorkspace({ type: "solo", id: null, name: "Особистий простір" });
+        await switchWorkspace({ type: "solo", id: null, name: "Особистий простір", role: "owner" });
       } else {
         const id = Number(cardMain.dataset.id);
         const name = cardMain.dataset.name;
@@ -332,7 +356,7 @@ function renderWorkspaceList() {
     });
   });
 
-  // Bind members button (owner)
+  // Bind members button
   container.querySelectorAll(".btn-manage-members").forEach(btn => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -357,7 +381,7 @@ function renderWorkspaceList() {
       const teamId = Number(btn.dataset.id);
       const teamName = btn.dataset.name;
 
-      if (!confirm(`Ви дійсно бажаєте безповоротно видалити корпоративне середовище "${teamName}"? Усі задачі цієї команди будуть видалені.`)) {
+      if (!confirm(`Ви дійсно бажаєте безповоротно видалити команду "${teamName}"? Усі колонки та задачі цієї команди будуть видалені.`)) {
         return;
       }
 
@@ -367,7 +391,7 @@ function renderWorkspaceList() {
         if (data.success) {
           showToast(`Команду "${teamName}" успішно видалено`, "success");
           if (currentWorkspace?.type === "team" && currentWorkspace?.id === teamId) {
-            await switchWorkspace({ type: "solo", id: null, name: "Особистий простір" });
+            await switchWorkspace({ type: "solo", id: null, name: "Особистий простір", role: "owner" });
           }
           await loadTeams();
           renderWorkspaceList();
@@ -380,14 +404,14 @@ function renderWorkspaceList() {
     });
   });
 
-  // Bind leave team button (member)
+  // Bind leave team button (member/admin)
   container.querySelectorAll(".btn-leave-team").forEach(btn => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const teamId = Number(btn.dataset.id);
       const teamName = btn.dataset.name;
 
-      if (!confirm(`Ви дійсно бажаєте вийти з корпоративної команди "${teamName}"?`)) {
+      if (!confirm(`Ви дійсно бажаєте вийти з команди "${teamName}"?`)) {
         return;
       }
 
@@ -397,7 +421,7 @@ function renderWorkspaceList() {
         if (data.success) {
           showToast(`Ви вийшли з команди "${teamName}"`, "info");
           if (currentWorkspace?.type === "team" && currentWorkspace?.id === teamId) {
-            await switchWorkspace({ type: "solo", id: null, name: "Особистий простір" });
+            await switchWorkspace({ type: "solo", id: null, name: "Особистий простір", role: "owner" });
           }
           await loadTeams();
           renderWorkspaceList();
@@ -424,9 +448,49 @@ async function loadAndRenderTeamMembersDrawer(teamId, teamName, drawer) {
     }
 
     const members = data.members || [];
+    const myRole = data.myRole || (userTeams.find(t => t.id === teamId)?.role) || "member";
+    const amOwner = myRole === "owner";
+    const amAdmin = myRole === "admin";
+
     let membersHtml = members.map(m => {
       const isSelf = currentUser && m.id === currentUser.id;
-      const isOwner = m.role === "owner";
+      const isMemberOwner = m.role === "owner";
+      const isMemberAdmin = m.role === "admin";
+
+      let roleBadge = `<span class="ws-member-role-badge member">👤 Учасник</span>`;
+      if (isMemberOwner) roleBadge = `<span class="ws-member-role-badge owner">👑 Власник</span>`;
+      else if (isMemberAdmin) roleBadge = `<span class="ws-member-role-badge admin">⭐ Адмін</span>`;
+
+      let actionButtons = "";
+      if (!isMemberOwner && !isSelf) {
+        // Owner can promote to admin or demote to member
+        if (amOwner) {
+          if (isMemberAdmin) {
+            actionButtons += `
+              <button type="button" class="btn-demote-member" data-team-id="${teamId}" data-user-id="${m.id}" data-name="${escapeHtml(m.name)}" title="Зняти статус адміністратора">
+                Зняти адміна
+              </button>
+            `;
+          } else {
+            actionButtons += `
+              <button type="button" class="btn-promote-member" data-team-id="${teamId}" data-user-id="${m.id}" data-name="${escapeHtml(m.name)}" title="Призначити адміністратором">
+                ⭐ Зробити адміном
+              </button>
+            `;
+          }
+        }
+
+        // Owner can remove any member. Admin can remove regular members (not other admins or owner)
+        const canKick = amOwner || (amAdmin && !isMemberAdmin);
+        if (canKick) {
+          actionButtons += `
+            <button type="button" class="btn-kick-member" data-team-id="${teamId}" data-user-id="${m.id}" data-name="${escapeHtml(m.name)}" title="Видалити учасника з дошки">
+              ❌ Видалити
+            </button>
+          `;
+        }
+      }
+
       return `
         <div class="ws-member-item">
           <div class="ws-member-left">
@@ -436,14 +500,9 @@ async function loadAndRenderTeamMembersDrawer(teamId, teamName, drawer) {
               <span class="ws-member-user">@${escapeHtml(m.username)}</span>
             </div>
           </div>
-          <div>
-            ${isOwner ? `
-              <span class="ws-member-role-badge owner">👑 Власник</span>
-            ` : `
-              <button type="button" class="btn-kick-member" data-team-id="${teamId}" data-user-id="${m.id}" data-name="${escapeHtml(m.name)}" title="Видалити учасника з команди">
-                ❌ Видалити
-              </button>
-            `}
+          <div class="ws-member-right">
+            ${roleBadge}
+            ${actionButtons}
           </div>
         </div>
       `;
@@ -457,6 +516,64 @@ async function loadAndRenderTeamMembersDrawer(teamId, teamName, drawer) {
         ${membersHtml}
       </div>
     `;
+
+    // Bind promote to admin
+    drawer.querySelectorAll(".btn-promote-member").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const targetUserId = Number(btn.dataset.userId);
+        const targetName = btn.dataset.name;
+
+        try {
+          const pRes = await fetch(`/api/teams/${teamId}/members/${targetUserId}/role`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role: "admin" })
+          });
+          const pData = await pRes.json();
+          if (pData.success) {
+            showToast(`Користувачу "${targetName}" надано права адміністратора!`, "success");
+            await loadAndRenderTeamMembersDrawer(teamId, teamName, drawer);
+            if (currentWorkspace?.type === "team" && currentWorkspace?.id === teamId) {
+              await loadTasks();
+            }
+          } else {
+            showToast(pData.error || "Не вдалося призначити адміністратора", "error");
+          }
+        } catch (err) {
+          showToast("Помилка мережі", "error");
+        }
+      });
+    });
+
+    // Bind demote from admin
+    drawer.querySelectorAll(".btn-demote-member").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const targetUserId = Number(btn.dataset.userId);
+        const targetName = btn.dataset.name;
+
+        try {
+          const dRes = await fetch(`/api/teams/${teamId}/members/${targetUserId}/role`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role: "member" })
+          });
+          const dData = await dRes.json();
+          if (dData.success) {
+            showToast(`Знято статус адміністратора з "${targetName}"`, "info");
+            await loadAndRenderTeamMembersDrawer(teamId, teamName, drawer);
+            if (currentWorkspace?.type === "team" && currentWorkspace?.id === teamId) {
+              await loadTasks();
+            }
+          } else {
+            showToast(dData.error || "Не вдалося зняти роль адміністратора", "error");
+          }
+        } catch (err) {
+          showToast("Помилка мережі", "error");
+        }
+      });
+    });
 
     // Bind kick buttons
     drawer.querySelectorAll(".btn-kick-member").forEach(kickBtn => {
@@ -520,24 +637,253 @@ function switchWsTab(tab) {
 }
 
 /* ==========================================================
+   DYNAMIC BOARD COLUMNS MANAGEMENT
+   ========================================================== */
+
+async function loadBoardColumns() {
+  try {
+    const teamParam = (currentWorkspace && currentWorkspace.type === "team")
+      ? currentWorkspace.id
+      : "solo";
+
+    const res = await fetch(`/api/columns?teamId=${teamParam}`);
+    const data = await res.json();
+    if (data.success) {
+      currentColumns = data.columns || [];
+      renderBoardColumns();
+    } else {
+      showToast(data.error || "Не вдалося завантажити колонки", "error");
+    }
+  } catch (e) {
+    console.error("Failed to load columns:", e);
+  }
+}
+
+function getColumnIcon(statusKey, colName = "") {
+  const lower = (statusKey + " " + colName).toLowerCase();
+  if (lower.includes("todo") || lower.includes("викон")) return "📋";
+  if (lower.includes("in-progress") || lower.includes("процес") || lower.includes("робот")) return "⚡";
+  if (lower.includes("done") || lower.includes("заверш") || lower.includes("готов")) return "✅";
+  if (lower.includes("test") || lower.includes("тест")) return "🧪";
+  if (lower.includes("review") || lower.includes("рев")) return "👀";
+  if (lower.includes("block") || lower.includes("блок")) return "⛔";
+  return "📌";
+}
+
+function renderBoardColumns() {
+  const board = document.getElementById("kanban-board");
+  const mobileTabs = document.getElementById("mobile-board-tabs");
+  const mobileTargetsRow = document.getElementById("mobile-drag-targets-row");
+  if (!board) return;
+
+  const isAdminOrOwner = currentWorkspace?.type === "solo" || currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin";
+
+  // 1. Render Columns on Board
+  let columnsHtml = "";
+  currentColumns.forEach((col, idx) => {
+    const icon = getColumnIcon(col.status_key, col.name);
+    const isFirstColumn = idx === 0 || col.status_key === "todo";
+
+    let adminControls = "";
+    if (isAdminOrOwner) {
+      adminControls = `
+        <div class="column-actions-group">
+          <button type="button" class="btn-col-action btn-edit-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" title="Редагувати назву колонки">✏️</button>
+          ${currentColumns.length > 1 ? `
+            <button type="button" class="btn-col-action btn-delete-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" title="Видалити колонку">🗑️</button>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // Quick add task input inside the first column ("До виконання")
+    let quickAddHtml = "";
+    if (isFirstColumn) {
+      quickAddHtml = `
+        <div class="quick-add-task-box">
+          <form class="quick-add-task-form" id="quick-add-task-form" data-status="${col.status_key}">
+            <input type="text" class="quick-add-task-input" id="quick-add-task-input" placeholder="+ Додати задачу... (натисніть Enter)" maxlength="200" autocomplete="off" required>
+            <button type="submit" class="quick-add-task-btn" title="Додати задачу">+</button>
+          </form>
+        </div>
+      `;
+    }
+
+    columnsHtml += `
+      <div class="kanban-column" id="column-${col.status_key}" data-status="${col.status_key}">
+        <div class="column-header">
+          <div class="column-title-group">
+            <span class="column-icon">${icon}</span>
+            <h2 class="column-title">${escapeHtml(col.name)}</h2>
+          </div>
+          ${adminControls}
+          <span class="column-count-badge" id="count-col-${col.status_key}">0</span>
+        </div>
+        ${quickAddHtml}
+        <div class="column-dropzone" id="dropzone-${col.status_key}" data-status="${col.status_key}">
+          <!-- Task cards -->
+        </div>
+      </div>
+    `;
+  });
+
+  // If Admin / Owner, append Add Column card at the end of board
+  if (isAdminOrOwner) {
+    columnsHtml += `
+      <div class="add-column-card">
+        <button type="button" class="btn-add-column" id="btn-add-column">
+          <span>+ Додати колонку</span>
+        </button>
+      </div>
+    `;
+  }
+
+  board.innerHTML = columnsHtml;
+
+  // 2. Render Mobile Board Tabs
+  if (mobileTabs) {
+    let tabsHtml = currentColumns.map((col, idx) => {
+      const icon = getColumnIcon(col.status_key, col.name);
+      return `
+        <button class="mobile-board-tab ${idx === 0 ? 'active' : ''}" data-col="${col.status_key}" type="button">
+          ${icon} ${escapeHtml(col.name)} (<span id="mob-count-col-${col.status_key}">0</span>)
+        </button>
+      `;
+    }).join("");
+    mobileTabs.innerHTML = tabsHtml;
+    initMobileBoardTabs();
+  }
+
+  // 3. Render Floating Mobile Drag Targets
+  if (mobileTargetsRow) {
+    let targetsHtml = currentColumns.map(col => {
+      const icon = getColumnIcon(col.status_key, col.name);
+      return `
+        <div class="mobile-drop-target" data-status="${col.status_key}">
+          <span class="mdt-icon">${icon}</span>
+          <span class="mdt-title">${escapeHtml(col.name)}</span>
+        </div>
+      `;
+    }).join("");
+    mobileTargetsRow.innerHTML = targetsHtml;
+  }
+
+  // 4. Setup Drag & Drop on freshly rendered dropzones
+  setupDragAndDrop();
+
+  // 5. Bind quick add task form listener
+  const quickAddForm = document.getElementById("quick-add-task-form");
+  if (quickAddForm) {
+    quickAddForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) {
+        openAuthModal();
+        return;
+      }
+      const input = quickAddForm.querySelector(".quick-add-task-input");
+      const title = input.value.trim();
+      if (!title) return;
+
+      const targetStatus = quickAddForm.dataset.status || (currentColumns[0]?.status_key ?? "todo");
+      const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : null;
+
+      try {
+        const res = await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            status: targetStatus,
+            difficulty: "mid",
+            teamId: teamParam,
+            assigneeIds: [currentUser.id]
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          input.value = "";
+          showToast(`Задачу "${title}" успішно додано!`, "success");
+          await loadTasks();
+        } else {
+          showToast(data.error || "Не вдалося створити задачу", "error");
+        }
+      } catch (err) {
+        showToast("Помилка зв'язку із сервером", "error");
+      }
+    });
+  }
+
+  // 6. Bind Column Admin Action Listeners
+  if (isAdminOrOwner) {
+    // Add column button
+    document.getElementById("btn-add-column")?.addEventListener("click", () => {
+      document.getElementById("new-column-name-input").value = "";
+      openModal("add-column-modal-backdrop");
+    });
+
+    // Edit column buttons
+    board.querySelectorAll(".btn-edit-col").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const colId = btn.dataset.colId;
+        const colName = btn.dataset.colName;
+        document.getElementById("edit-column-id-input").value = colId;
+        document.getElementById("edit-column-name-input").value = colName;
+        openModal("edit-column-modal-backdrop");
+      });
+    });
+
+    // Delete column buttons
+    board.querySelectorAll(".btn-delete-col").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const colId = btn.dataset.colId;
+        const colName = btn.dataset.colName;
+
+        if (!confirm(`Видалити колонку "${colName}"? Усі задачі з цієї колонки будуть автоматично перенесені в іншу колонку.`)) {
+          return;
+        }
+
+        const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
+        try {
+          const res = await fetch(`/api/columns/${colId}?teamId=${teamParam}`, { method: "DELETE" });
+          const data = await res.json();
+          if (data.success) {
+            showToast(`Колонку "${colName}" успішно видалено!`, "success");
+            await loadBoardColumns();
+            await loadTasks();
+          } else {
+            showToast(data.error || "Не вдалося видалити колонку", "error");
+          }
+        } catch (err) {
+          showToast("Помилка зв'язку із сервером", "error");
+        }
+      });
+    });
+  }
+}
+
+/* ==========================================================
    DATA LOADING (TASKS)
    ========================================================== */
 
 function populateAssigneeOptions() {
   // 1. Filter dropdown
   const filterSelect = document.getElementById("filter-assignee");
-  const prevFilterVal = filterSelect.value;
-  filterSelect.innerHTML = `
-    <option value="">Усі користувачі</option>
-    <option value="me">Тільки призначені мені</option>
-  `;
-  allUsers.forEach(u => {
-    const opt = document.createElement("option");
-    opt.value = u.id;
-    opt.textContent = `${u.name} (@${u.username})`;
-    filterSelect.appendChild(opt);
-  });
-  filterSelect.value = prevFilterVal || "";
+  if (filterSelect) {
+    const prevFilterVal = filterSelect.value;
+    filterSelect.innerHTML = `
+      <option value="">Усі користувачі</option>
+      <option value="me">Тільки призначені мені</option>
+    `;
+    allUsers.forEach(u => {
+      const opt = document.createElement("option");
+      opt.value = u.id;
+      opt.textContent = `${u.name} (@${u.username})`;
+      filterSelect.appendChild(opt);
+    });
+    filterSelect.value = prevFilterVal || "";
+  }
 
   // 2. Task modal checklist
   const checklist = document.getElementById("task-assignees-checklist");
@@ -586,14 +932,14 @@ async function loadTasks() {
    ========================================================== */
 
 function renderEmptyBoard() {
-  ["todo", "in-progress", "done"].forEach(status => {
-    const dropzone = document.getElementById(`dropzone-${status}`);
+  currentColumns.forEach(c => {
+    const dropzone = document.getElementById(`dropzone-${c.status_key}`);
     if (dropzone) {
       dropzone.innerHTML = `<div class="empty-col-placeholder">Увійдіть, щоб переглянути задачі</div>`;
     }
-    const countBadge = document.getElementById(`count-col-${status}`);
+    const countBadge = document.getElementById(`count-col-${c.status_key}`);
     if (countBadge) countBadge.textContent = "0";
-    const mobCountBadge = document.getElementById(`mob-count-col-${status}`);
+    const mobCountBadge = document.getElementById(`mob-count-col-${c.status_key}`);
     if (mobCountBadge) mobCountBadge.textContent = "0";
   });
   updateDashboardStats([]);
@@ -601,12 +947,12 @@ function renderEmptyBoard() {
 }
 
 function renderBoard() {
-  const filterAssignee = document.getElementById("filter-assignee").value;
-  const filterTagInput = document.getElementById("filter-tag").value.trim().toLowerCase();
+  const filterAssignee = document.getElementById("filter-assignee")?.value || "";
+  const filterTagInput = document.getElementById("filter-tag")?.value.trim().toLowerCase() || "";
 
   // Filter tasks
   const filteredTasks = allTasks.filter(task => {
-    // Assignee filter (supports multiple assignees and is_all_assignees)
+    // Assignee filter
     if (filterAssignee === "me") {
       if (!currentUser) return false;
       const isAssigned = task.is_all_assignees ||
@@ -636,37 +982,37 @@ function renderBoard() {
     return true;
   });
 
-  // Group by status
-  const columns = {
-    "todo": document.getElementById("dropzone-todo"),
-    "in-progress": document.getElementById("dropzone-in-progress"),
-    "done": document.getElementById("dropzone-done")
-  };
+  // Initialize counts for all current columns
+  const counts = {};
+  currentColumns.forEach(col => {
+    counts[col.status_key] = 0;
+    const dropzone = document.getElementById(`dropzone-${col.status_key}`);
+    if (dropzone) {
+      dropzone.innerHTML = "";
+    }
+  });
 
-  Object.values(columns).forEach(col => col.innerHTML = "");
-
-  const counts = { "todo": 0, "in-progress": 0, "done": 0 };
-
+  // Distribute tasks into columns
   filteredTasks.forEach(task => {
     if (counts[task.status] !== undefined) {
       counts[task.status]++;
     }
-    const col = columns[task.status];
+    const col = document.getElementById(`dropzone-${task.status}`);
     if (col) {
       col.appendChild(createTaskCardElement(task));
     }
   });
 
-  // Empty state placeholders
-  Object.keys(columns).forEach(status => {
-    const col = columns[status];
-    if (counts[status] === 0) {
+  // Empty state placeholders & badges
+  currentColumns.forEach(c => {
+    const col = document.getElementById(`dropzone-${c.status_key}`);
+    if (col && counts[c.status_key] === 0) {
       col.innerHTML = `<div class="empty-col-placeholder">Немає задач у цьому списку</div>`;
     }
-    const badge = document.getElementById(`count-col-${status}`);
-    if (badge) badge.textContent = counts[status];
-    const mobBadge = document.getElementById(`mob-count-col-${status}`);
-    if (mobBadge) mobBadge.textContent = counts[status];
+    const badge = document.getElementById(`count-col-${c.status_key}`);
+    if (badge) badge.textContent = counts[c.status_key] || 0;
+    const mobBadge = document.getElementById(`mob-count-col-${c.status_key}`);
+    if (mobBadge) mobBadge.textContent = counts[c.status_key] || 0;
   });
 
   updateDashboardStats(filteredTasks);
@@ -678,39 +1024,46 @@ function createTaskCardElement(task) {
   card.className = "task-card";
   card.dataset.taskId = task.id;
 
+  const isAdminOrOwner = currentWorkspace?.type === "solo" || currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin";
+  const isCreator = currentUser && (currentUser.id === task.creator_id);
   const isAssignee = currentUser && (
     task.is_all_assignees ||
     (Array.isArray(task.assignees) && task.assignees.some(a => a.id === currentUser.id)) ||
     task.assignee_id === currentUser.id
   );
-  const isCreator = currentUser && (currentUser.id === task.creator_id);
 
-  if (isAssignee) {
+  const canManage = isCreator || isAdminOrOwner;
+  const canMove = isAssignee || canManage;
+
+  if (canMove) {
     card.classList.add("is-draggable");
     card.setAttribute("draggable", "true");
   } else {
     card.classList.add("not-draggable");
   }
 
-  // Difficulty Pill class & text
-  const diffClass = task.difficulty === "ez" ? "ez" : task.difficulty === "mid" ? "mid" : "oh-fu";
+  // Priority Pill: Low (ez), Mid, High (oh fu..)
+  const diffClass = (task.difficulty === "low" || task.difficulty === "ez") ? "low"
+    : (task.difficulty === "high" || task.difficulty === "oh fu..") ? "high"
+    : "mid";
+  const diffLabel = diffClass === "low" ? "Низький" : diffClass === "high" ? "Високий" : "Середній";
 
   // Tags HTML
   const tagsHtml = task.tags && task.tags.length
     ? task.tags.map(t => `<span class="task-tag-pill" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</span>`).join("")
     : "";
 
-  // Actions for creator / assignee
+  // Actions for creator / admin
   let creatorActionsHtml = "";
-  if (isCreator) {
+  if (canManage) {
     creatorActionsHtml = `
       <div class="task-actions">
-        ${isAssignee ? `<button class="btn-icon-action move-task-btn" title="Перемістити задачу" aria-label="Move task">⇄</button>` : ""}
+        ${canMove ? `<button class="btn-icon-action move-task-btn" title="Перемістити задачу" aria-label="Move task">⇄</button>` : ""}
         <button class="btn-icon-action edit-task-btn" title="Редагувати задачу" aria-label="Edit task">✏️</button>
         <button class="btn-icon-action delete delete-task-btn" title="Видалити задачу" aria-label="Delete task">🗑️</button>
       </div>
     `;
-  } else if (isAssignee) {
+  } else if (canMove) {
     creatorActionsHtml = `
       <div class="task-actions">
         <button class="btn-icon-action move-task-btn" title="Перемістити задачу" aria-label="Move task">⇄</button>
@@ -740,42 +1093,39 @@ function createTaskCardElement(task) {
   }
 
   // Drag permission hint
-  const dragHintHtml = isAssignee
-    ? `<span class="task-drag-hint can-drag" title="Ви можете перетягувати цю задачу між колонками">⋮⋮ Виконавець (тягни)</span>`
-    : `<span class="task-drag-hint locked" title="Переміщувати можуть лише призначені виконавці">🔒 Лише виконавці</span>`;
+  let dragHintHtml = "";
+  if (isAdminOrOwner) {
+    dragHintHtml = `<span class="task-drag-hint can-drag" title="Ви маєте права адміністратора дошки">👑 Адмін (тягни)</span>`;
+  } else if (isAssignee) {
+    dragHintHtml = `<span class="task-drag-hint can-drag" title="Ви є виконавцем цієї задачі">⋮⋮ Виконавець (тягни)</span>`;
+  } else if (isCreator) {
+    dragHintHtml = `<span class="task-drag-hint can-drag" title="Ви є автором цієї задачі">⋮⋮ Автор (тягни)</span>`;
+  } else {
+    dragHintHtml = `<span class="task-drag-hint locked" title="Переміщувати можуть виконавці та адміністратори">🔒 Лише виконавці / адмін</span>`;
+  }
 
-  // Quick move buttons for mobile / touch accessibility
+  // Dynamic Quick Move buttons between columns
   let quickMovesHtml = "";
-  if (isAssignee) {
-    if (task.status === "todo") {
+  if (canMove && currentColumns.length > 1) {
+    const colIdx = currentColumns.findIndex(c => c.status_key === task.status);
+    const prevCol = colIdx > 0 ? currentColumns[colIdx - 1] : null;
+    const nextCol = (colIdx >= 0 && colIdx < currentColumns.length - 1) ? currentColumns[colIdx + 1] : null;
+
+    if (prevCol || nextCol) {
       quickMovesHtml = `
-        <div class="task-quick-moves">
-          <button type="button" class="btn-quick-move btn-move-next" data-move-to="in-progress" title="Перемістити в роботу">
-            <span>Взяти в роботу</span>
-            <span class="btn-qm-arrow">⚡ ➔</span>
-          </button>
-        </div>
-      `;
-    } else if (task.status === "in-progress") {
-      quickMovesHtml = `
-        <div class="task-quick-moves dual">
-          <button type="button" class="btn-quick-move btn-move-prev" data-move-to="todo" title="Повернути до виконання">
-            <span class="btn-qm-arrow">◀ 📋</span>
-            <span>До викон.</span>
-          </button>
-          <button type="button" class="btn-quick-move btn-move-done" data-move-to="done" title="Позначити виконаною">
-            <span>Виконано</span>
-            <span class="btn-qm-arrow">✅ ➔</span>
-          </button>
-        </div>
-      `;
-    } else if (task.status === "done") {
-      quickMovesHtml = `
-        <div class="task-quick-moves">
-          <button type="button" class="btn-quick-move btn-move-reopen" data-move-to="in-progress" title="Повернути в роботу">
-            <span class="btn-qm-arrow">◀ ⚡</span>
-            <span>Повернути в роботу</span>
-          </button>
+        <div class="task-quick-moves ${prevCol && nextCol ? 'dual' : ''}">
+          ${prevCol ? `
+            <button type="button" class="btn-quick-move btn-move-prev" data-move-to="${prevCol.status_key}" title="Перемістити в ${escapeHtml(prevCol.name)}">
+              <span class="btn-qm-arrow">◀</span>
+              <span>${escapeHtml(prevCol.name)}</span>
+            </button>
+          ` : ''}
+          ${nextCol ? `
+            <button type="button" class="btn-quick-move btn-move-next" data-move-to="${nextCol.status_key}" title="Перемістити в ${escapeHtml(nextCol.name)}">
+              <span>${escapeHtml(nextCol.name)}</span>
+              <span class="btn-qm-arrow">▶</span>
+            </button>
+          ` : ''}
         </div>
       `;
     }
@@ -783,7 +1133,7 @@ function createTaskCardElement(task) {
 
   card.innerHTML = `
     <div class="task-top-row">
-      <span class="diff-pill ${diffClass}">${escapeHtml(task.difficulty)}</span>
+      <span class="diff-pill ${diffClass}">${escapeHtml(diffLabel)}</span>
       ${creatorActionsHtml}
     </div>
 
@@ -816,7 +1166,7 @@ function createTaskCardElement(task) {
   }
 
   // Bind edit & delete events
-  if (isCreator) {
+  if (canManage) {
     const editBtn = card.querySelector(".edit-task-btn");
     if (editBtn) {
       editBtn.addEventListener("click", (e) => {
@@ -847,7 +1197,7 @@ function createTaskCardElement(task) {
   });
 
   // DRAG AND DROP & QUICK MOVE EVENTS ON CARD
-  if (isAssignee) {
+  if (canMove) {
     card.querySelectorAll(".btn-quick-move").forEach(btn => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -874,9 +1224,7 @@ function createTaskCardElement(task) {
     });
   } else {
     card.addEventListener("click", () => {
-      if (!isCreator) {
-        showToast("Переміщувати задачу можуть лише призначені виконавці!", "info");
-      }
+      showToast("Переміщувати задачу можуть лише призначені виконавці або адміністратори!", "info");
     });
   }
 
@@ -892,13 +1240,35 @@ let currentTaskForMove = null;
 function openMoveTaskModal(task) {
   currentTaskForMove = task;
   const nameEl = document.getElementById("move-task-modal-name");
+  const optionsGrid = document.getElementById("move-options-grid");
   if (nameEl) {
     nameEl.textContent = task.title;
   }
 
-  document.querySelectorAll(".btn-move-option").forEach(btn => {
-    btn.classList.toggle("current-status", btn.dataset.status === task.status);
-  });
+  if (optionsGrid) {
+    optionsGrid.innerHTML = currentColumns.map(col => {
+      const icon = getColumnIcon(col.status_key, col.name);
+      const isCurrent = col.status_key === task.status;
+      return `
+        <button type="button" class="btn-move-option ${isCurrent ? 'current-status' : ''}" data-status="${col.status_key}">
+          <span class="mvo-icon">${icon}</span>
+          <div class="mvo-text">
+            <strong>${escapeHtml(col.name)}</strong>
+          </div>
+        </button>
+      `;
+    }).join("");
+
+    optionsGrid.querySelectorAll(".btn-move-option").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const targetStatus = btn.dataset.status;
+        if (currentTaskForMove && targetStatus) {
+          closeModal("move-task-modal-backdrop");
+          await updateTaskStatus(currentTaskForMove.id, targetStatus);
+        }
+      });
+    });
+  }
 
   openModal("move-task-modal-backdrop");
 }
@@ -909,14 +1279,16 @@ async function updateTaskStatus(taskId, targetStatus) {
   if (!task) return;
   if (task.status === targetStatus) return;
 
+  const isAdminOrOwner = currentWorkspace?.type === "solo" || currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin";
+  const isCreator = currentUser && (currentUser.id === task.creator_id);
   const isAssigned = currentUser && (
     task.is_all_assignees ||
     (Array.isArray(task.assignees) && task.assignees.some(a => a.id === currentUser.id)) ||
     task.assignee_id === currentUser.id
   );
 
-  if (!isAssigned) {
-    showToast("Переміщувати статус задачі можуть лише призначені виконавці!", "error");
+  if (!isAssigned && !isCreator && !isAdminOrOwner) {
+    showToast("Переміщувати статус задачі можуть лише призначені виконавці, автор або адміністратори!", "error");
     return;
   }
 
@@ -940,8 +1312,9 @@ async function updateTaskStatus(taskId, targetStatus) {
       renderBoard();
       showToast(data.error || "Не вдалося змінити статус", "error");
     } else {
-      const statusLabels = { "todo": "До виконання", "in-progress": "В процесі", "done": "Виконано" };
-      showToast(`Задачу переміщено в «${statusLabels[targetStatus] || targetStatus}»`, "success");
+      const col = currentColumns.find(c => c.status_key === targetStatus);
+      const colName = col ? col.name : targetStatus;
+      showToast(`Задачу переміщено в «${colName}»`, "success");
     }
   } catch (err) {
     task.status = prevStatus;
@@ -986,7 +1359,9 @@ function setupDragAndDrop() {
 
 function updateDashboardStats(tasks) {
   const total = tasks.length;
-  const doneCount = tasks.filter(t => t.status === "done").length;
+  const doneColumn = currentColumns.find(c => c.status_key === "done" || c.name.toLowerCase().includes("викон"));
+  const doneStatus = doneColumn ? doneColumn.status_key : "done";
+  const doneCount = tasks.filter(t => t.status === doneStatus).length;
   const pct = total === 0 ? 0 : Math.round((doneCount / total) * 100);
 
   // Donut meter
@@ -1001,14 +1376,18 @@ function updateDashboardStats(tasks) {
     meterEl.style.strokeDashoffset = offset;
   }
 
-  // Difficulty counts
-  const ezCount = tasks.filter(t => t.difficulty === "ez").length;
+  // Priority counts (low, mid, high)
+  const lowCount = tasks.filter(t => t.difficulty === "low" || t.difficulty === "ez").length;
   const midCount = tasks.filter(t => t.difficulty === "mid").length;
-  const ohFuCount = tasks.filter(t => t.difficulty === "oh fu..").length;
+  const highCount = tasks.filter(t => t.difficulty === "high" || t.difficulty === "oh fu..").length;
 
-  document.getElementById("count-ez").innerText = `${ezCount} ez`;
-  document.getElementById("count-mid").innerText = `${midCount} mid`;
-  document.getElementById("count-oh-fu").innerText = `${ohFuCount} oh fu..`;
+  const countEzEl = document.getElementById("count-ez");
+  const countMidEl = document.getElementById("count-mid");
+  const countOhFuEl = document.getElementById("count-oh-fu");
+
+  if (countEzEl) countEzEl.innerText = `${lowCount} низький`;
+  if (countMidEl) countMidEl.innerText = `${midCount} середній`;
+  if (countOhFuEl) countOhFuEl.innerText = `${highCount} високий`;
 }
 
 function renderTagChips(tasks) {
@@ -1077,7 +1456,7 @@ function openCreateTaskModal() {
   document.getElementById("task-desc-input").value = "";
   document.getElementById("task-tags-input").value = "";
 
-  // Default difficulty: mid
+  // Default priority: mid
   const diffRadios = document.querySelectorAll('input[name="task-difficulty"]');
   diffRadios.forEach(r => r.checked = (r.value === "mid"));
 
@@ -1108,22 +1487,28 @@ function openEditTaskModal(task) {
   document.getElementById("task-desc-input").value = task.description || "";
   document.getElementById("task-tags-input").value = (task.tags || []).join(", ");
 
-  const diffRadios = document.querySelectorAll('input[name="task-difficulty"]');
-  diffRadios.forEach(r => r.checked = (r.value === task.difficulty));
+  let normDiff = task.difficulty;
+  if (normDiff === "ez") normDiff = "low";
+  if (normDiff === "oh fu..") normDiff = "high";
 
-  const isAll = Boolean(task.is_all_assignees);
+  const diffRadios = document.querySelectorAll('input[name="task-difficulty"]');
+  diffRadios.forEach(r => {
+    r.checked = (r.value === normDiff || (r.value === "low" && task.difficulty === "ez") || (r.value === "high" && task.difficulty === "oh fu.."));
+  });
+
   const assignAllCb = document.getElementById("task-assign-all-checkbox");
   if (assignAllCb) {
-    assignAllCb.checked = isAll;
-    updateAssigneesChecklistState(isAll);
+    assignAllCb.checked = Boolean(task.is_all_assignees);
+    updateAssigneesChecklistState(task.is_all_assignees);
   }
 
   const checklist = document.getElementById("task-assignees-checklist");
   if (checklist) {
+    const assignedIds = new Set((task.assignees || []).map(a => Number(a.id)));
+    if (task.assignee_id) assignedIds.add(Number(task.assignee_id));
+
     checklist.querySelectorAll(".user-assignee-cb").forEach(cb => {
-      const isAssigned = isAll || 
-        (Array.isArray(task.assignees) && task.assignees.some(a => a.id === Number(cb.value))) || 
-        (task.assignee_id === Number(cb.value));
+      const isAssigned = assignedIds.has(Number(cb.value));
       cb.checked = isAssigned;
       cb.closest(".assignee-checkbox-item")?.classList.toggle("selected", isAssigned);
     });
@@ -1134,68 +1519,74 @@ function openEditTaskModal(task) {
 
 async function handleTaskFormSubmit(e) {
   e.preventDefault();
-
   const taskId = document.getElementById("task-id-input").value;
   const title = document.getElementById("task-title-input").value.trim();
   const description = document.getElementById("task-desc-input").value.trim();
-  const difficulty = document.querySelector('input[name="task-difficulty"]:checked')?.value || "mid";
-  const isAllAssignees = document.getElementById("task-assign-all-checkbox")?.checked || false;
-  const checkedBoxes = document.querySelectorAll('#task-assignees-checklist .user-assignee-cb:checked');
-  const assigneeIds = Array.from(checkedBoxes).map(cb => Number(cb.value));
-  const rawTags = document.getElementById("task-tags-input").value;
+  const tagsStr = document.getElementById("task-tags-input").value;
+  const isAllAssignees = document.getElementById("task-assign-all-checkbox").checked;
 
-  const tags = rawTags.split(",")
-    .map(t => t.trim().replace(/^#/, ""))
-    .filter(Boolean);
-
-  if (!title) {
-    showToast("Вкажіть назву задачі", "error");
-    return;
+  let difficulty = "mid";
+  const checkedDiff = document.querySelector('input[name="task-difficulty"]:checked');
+  if (checkedDiff) {
+    difficulty = checkedDiff.value;
   }
 
-  if (!isAllAssignees && assigneeIds.length === 0) {
-    showToast("Оберіть хоча б одного виконавця або увімкніть «Призначити на всіх»", "error");
-    return;
-  }
+  const tags = tagsStr.split(",").map(t => t.trim()).filter(Boolean);
 
-  const teamId = (currentWorkspace && currentWorkspace.type === "team")
+  const assigneeIds = [];
+  document.querySelectorAll(".user-assignee-cb:checked").forEach(cb => {
+    assigneeIds.push(Number(cb.value));
+  });
+
+  const teamParam = (currentWorkspace && currentWorkspace.type === "team")
     ? currentWorkspace.id
     : null;
 
   try {
+    let res;
     if (taskId) {
-      // EDIT existing task
-      const res = await fetch(`/api/tasks/${taskId}`, {
+      // Edit task
+      res = await fetch(`/api/tasks/${taskId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, difficulty, assigneeIds, isAllAssignees, tags })
+        body: JSON.stringify({
+          title,
+          description,
+          difficulty,
+          tags,
+          assigneeIds,
+          isAllAssignees
+        })
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast("Задачу успішно оновлено", "success");
-        closeModal("task-modal-backdrop");
-        await loadTasks();
-      } else {
-        showToast(data.error || "Помилка при оновленні задачі", "error");
-      }
     } else {
-      // CREATE new task
-      const res = await fetch("/api/tasks", {
+      // Create task (default to first column)
+      const defaultStatus = currentColumns[0]?.status_key || "todo";
+      res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, difficulty, assigneeIds, isAllAssignees, tags, teamId })
+        body: JSON.stringify({
+          title,
+          description,
+          status: defaultStatus,
+          difficulty,
+          tags,
+          assigneeIds,
+          isAllAssignees,
+          teamId: teamParam
+        })
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast("Задачу створено!", "success");
-        closeModal("task-modal-backdrop");
-        await loadTasks();
-      } else {
-        showToast(data.error || "Помилка при створенні задачі", "error");
-      }
+    }
+
+    const data = await res.json();
+    if (data.success) {
+      closeModal("task-modal-backdrop");
+      showToast(taskId ? "Задачу оновлено" : "Задачу створено", "success");
+      await loadTasks();
+    } else {
+      showToast(data.error || "Помилка при збереженні", "error");
     }
   } catch (err) {
-    showToast("Помилка збереження задачі", "error");
+    showToast("Помилка зв'язку із сервером", "error");
   }
 }
 
@@ -1203,19 +1594,19 @@ async function deleteTask(taskId) {
   try {
     const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
     const data = await res.json();
-    if (res.ok && data.success) {
-      showToast("Задачу видалено", "success");
+    if (data.success) {
+      showToast("Задачу видалено", "info");
       await loadTasks();
     } else {
-      showToast(data.error || "Помилка видалення", "error");
+      showToast(data.error || "Не вдалося видалити", "error");
     }
-  } catch (err) {
-    showToast("Помилка видалення задачі", "error");
+  } catch (e) {
+    showToast("Помилка зв'язку із сервером", "error");
   }
 }
 
 /* ==========================================================
-   MODAL HELPERS
+   MODALS & EVENT BINDINGS
    ========================================================== */
 
 function openModal(id) {
@@ -1227,46 +1618,43 @@ function closeModal(id) {
 }
 
 function openAuthModal() {
-  document.getElementById("auth-error-msg").style.display = "none";
+  const err = document.getElementById("auth-error-msg");
+  if (err) err.style.display = "none";
   switchAuthTab("login");
   openModal("auth-modal-backdrop");
 }
 
 function switchAuthTab(tab) {
   const tabLogin = document.getElementById("tab-login");
-  const tabReg = document.getElementById("tab-register");
+  const tabRegister = document.getElementById("tab-register");
   const formLogin = document.getElementById("login-form");
-  const formReg = document.getElementById("register-form");
+  const formRegister = document.getElementById("register-form");
   const errorBox = document.getElementById("auth-error-msg");
 
-  errorBox.style.display = "none";
+  if (errorBox) errorBox.style.display = "none";
 
   if (tab === "login") {
-    tabLogin.classList.add("active");
-    tabReg.classList.remove("active");
-    formLogin.style.display = "flex";
-    formReg.style.display = "none";
+    tabLogin?.classList.add("active");
+    tabRegister?.classList.remove("active");
+    if (formLogin) formLogin.style.display = "flex";
+    if (formRegister) formRegister.style.display = "none";
   } else {
-    tabReg.classList.add("active");
-    tabLogin.classList.remove("active");
-    formLogin.style.display = "none";
-    formReg.style.display = "flex";
+    tabRegister?.classList.add("active");
+    tabLogin?.classList.remove("active");
+    if (formRegister) formRegister.style.display = "flex";
+    if (formLogin) formLogin.style.display = "none";
   }
 }
 
-/* ==========================================================
-   EVENT LISTENERS SETUP
-   ========================================================== */
-
 function setupEventListeners() {
-  // Workspace Switcher button in header
+  // Workspace button
   document.getElementById("btn-workspace-switch")?.addEventListener("click", openWorkspaceModal);
   document.getElementById("btn-close-workspace-modal")?.addEventListener("click", () => closeModal("workspace-modal-backdrop"));
   document.getElementById("workspace-modal-backdrop")?.addEventListener("click", (e) => {
     if (e.target.id === "workspace-modal-backdrop") closeModal("workspace-modal-backdrop");
   });
 
-  // Workspace modal tabs
+  // Workspace tabs
   document.getElementById("tab-ws-list")?.addEventListener("click", () => switchWsTab("list"));
   document.getElementById("tab-ws-create")?.addEventListener("click", () => switchWsTab("create"));
   document.getElementById("tab-ws-join")?.addEventListener("click", () => switchWsTab("join"));
@@ -1286,9 +1674,9 @@ function setupEventListeners() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast(`Команду "${data.team.name}" успішно створено!`, "success");
+        showToast(`Команду "${data.team.name}" створено! Ви власник.`, "success");
         await loadTeams();
-        await switchWorkspace({ type: "team", id: data.team.id, name: data.team.name });
+        await switchWorkspace({ type: "team", id: data.team.id, name: data.team.name, role: "owner" });
         closeModal("workspace-modal-backdrop");
         document.getElementById("create-team-form").reset();
       } else {
@@ -1318,7 +1706,7 @@ function setupEventListeners() {
       if (res.ok && data.success) {
         showToast(`Ви приєдналися до команди "${data.team.name}"!`, "success");
         await loadTeams();
-        await switchWorkspace({ type: "team", id: data.team.id, name: data.team.name });
+        await switchWorkspace({ type: "team", id: data.team.id, name: data.team.name, role: "member" });
         closeModal("workspace-modal-backdrop");
         document.getElementById("join-team-form").reset();
       } else {
@@ -1374,8 +1762,6 @@ function setupEventListeners() {
         renderAuthHeader();
         showToast(`З поверненням, ${currentUser.name}!`, "success");
         await initWorkspaces();
-        // Prompt workspace selection after login
-        openWorkspaceModal();
       } else {
         errorBox.innerText = data.error || "Невірний логін або пароль";
         errorBox.style.display = "block";
@@ -1405,10 +1791,8 @@ function setupEventListeners() {
         currentUser = data.user;
         closeModal("auth-modal-backdrop");
         renderAuthHeader();
-        showToast(`Вітаємо, ${currentUser.name}! Акаунт створено.`, "success");
+        showToast(`Вітаємо, ${currentUser.name}! Акаунт успішно створено.`, "success");
         await initWorkspaces();
-        // Prompt workspace selection after register
-        openWorkspaceModal();
       } else {
         errorBox.innerText = data.error || "Помилка при реєстрації";
         errorBox.style.display = "block";
@@ -1434,14 +1818,69 @@ function setupEventListeners() {
     if (e.target.id === "move-task-modal-backdrop") closeModal("move-task-modal-backdrop");
   });
 
-  document.querySelectorAll(".btn-move-option").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const targetStatus = btn.dataset.status;
-      if (currentTaskForMove && targetStatus) {
-        closeModal("move-task-modal-backdrop");
-        await updateTaskStatus(currentTaskForMove.id, targetStatus);
+  // Add Column Modal events
+  document.getElementById("btn-close-add-column-modal")?.addEventListener("click", () => closeModal("add-column-modal-backdrop"));
+  document.getElementById("btn-cancel-add-column")?.addEventListener("click", () => closeModal("add-column-modal-backdrop"));
+  document.getElementById("add-column-modal-backdrop")?.addEventListener("click", (e) => {
+    if (e.target.id === "add-column-modal-backdrop") closeModal("add-column-modal-backdrop");
+  });
+  document.getElementById("add-column-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("new-column-name-input").value.trim();
+    if (!name) return;
+
+    const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
+    try {
+      const res = await fetch("/api/columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamId: teamParam, name })
+      });
+      const data = await res.json();
+      if (data.success) {
+        closeModal("add-column-modal-backdrop");
+        showToast(`Колонку "${name}" успішно створено!`, "success");
+        await loadBoardColumns();
+        await loadTasks();
+      } else {
+        showToast(data.error || "Помилка додавання колонки", "error");
       }
-    });
+    } catch (err) {
+      showToast("Помилка зв'язку із сервером", "error");
+    }
+  });
+
+  // Edit Column Modal events
+  document.getElementById("btn-close-edit-column-modal")?.addEventListener("click", () => closeModal("edit-column-modal-backdrop"));
+  document.getElementById("btn-cancel-edit-column")?.addEventListener("click", () => closeModal("edit-column-modal-backdrop"));
+  document.getElementById("edit-column-modal-backdrop")?.addEventListener("click", (e) => {
+    if (e.target.id === "edit-column-modal-backdrop") closeModal("edit-column-modal-backdrop");
+  });
+  document.getElementById("edit-column-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const colId = document.getElementById("edit-column-id-input").value;
+    const name = document.getElementById("edit-column-name-input").value.trim();
+    if (!name || !colId) return;
+
+    const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
+    try {
+      const res = await fetch(`/api/columns/${colId}?teamId=${teamParam}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (data.success) {
+        closeModal("edit-column-modal-backdrop");
+        showToast(`Назву колонки змінено на "${name}"`, "success");
+        await loadBoardColumns();
+        await loadTasks();
+      } else {
+        showToast(data.error || "Помилка редагування колонки", "error");
+      }
+    } catch (err) {
+      showToast("Помилка зв'язку із сервером", "error");
+    }
   });
 
   // Setup drag and drop on columns
@@ -1481,15 +1920,15 @@ function initMobileBoardTabs() {
       let closestCol = null;
       let minDistance = Infinity;
 
-      ["todo", "in-progress", "done"].forEach(status => {
-        const col = document.getElementById(`column-${status}`);
+      currentColumns.forEach(c => {
+        const col = document.getElementById(`column-${c.status_key}`);
         if (!col) return;
         const colRect = col.getBoundingClientRect();
         const colCenter = colRect.left + colRect.width / 2;
         const dist = Math.abs(boardCenter - colCenter);
         if (dist < minDistance) {
           minDistance = dist;
-          closestCol = status;
+          closestCol = c.status_key;
         }
       });
 

@@ -422,9 +422,9 @@ body {
   letter-spacing: 0.3px;
 }
 
-.diff-pill.ez { background: var(--diff-ez-bg); color: var(--diff-ez-txt); }
+.diff-pill.low, .diff-pill.ez { background: var(--diff-ez-bg); color: var(--diff-ez-txt); }
 .diff-pill.mid { background: var(--diff-mid-bg); color: var(--diff-mid-txt); }
-.diff-pill.oh-fu { background: var(--diff-oh-bg); color: var(--diff-oh-txt); }
+.diff-pill.high, .diff-pill.oh-fu { background: var(--diff-oh-bg); color: var(--diff-oh-txt); }
 
 /* Filters Widget */
 .filters-widget {
@@ -558,6 +558,121 @@ body {
   background: rgba(0,0,0,0.06);
   padding: 2px 8px;
   border-radius: var(--radius-pill);
+}
+
+.column-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  margin-right: 6px;
+}
+
+.btn-col-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  opacity: 0.65;
+  transition: var(--transition);
+}
+
+.btn-col-action:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.08);
+  transform: scale(1.08);
+}
+
+/* Inline Quick Add Task Box */
+.quick-add-task-box {
+  padding: 0 12px 10px 12px;
+}
+
+.quick-add-task-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-page);
+  border: 1px dashed var(--border-input);
+  border-radius: 8px;
+  padding: 3px 6px 3px 10px;
+  transition: var(--transition);
+}
+
+.quick-add-task-form:focus-within {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--card-bg);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.quick-add-task-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-main);
+  outline: none;
+  font-family: inherit;
+  padding: 6px 0;
+}
+
+.quick-add-task-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #FFF;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.quick-add-task-btn:hover {
+  transform: scale(1.08);
+}
+
+/* Add Column Block */
+.add-column-card {
+  flex: 0 0 280px;
+  min-height: 180px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.btn-add-column {
+  width: 100%;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 2px dashed var(--border-input);
+  border-radius: var(--radius-card);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: var(--transition);
+  font-family: inherit;
+  user-select: none;
+}
+
+.btn-add-column:hover {
+  background: var(--card-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-2px);
 }
 
 .column-dropzone {
@@ -1012,6 +1127,7 @@ body {
   display: none;
 }
 
+.diff-option.low:has(input:checked),
 .diff-option.ez:has(input:checked) {
   background: var(--diff-ez-bg);
   color: var(--diff-ez-txt);
@@ -1024,6 +1140,7 @@ body {
   border-color: var(--diff-mid-txt);
 }
 
+.diff-option.high:has(input:checked),
 .diff-option.oh-fu:has(input:checked) {
   background: var(--diff-oh-bg);
   color: var(--diff-oh-txt);
@@ -1435,6 +1552,64 @@ body {
 .ws-member-user {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.ws-member-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ws-member-role-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ws-member-role-badge.owner {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.ws-member-role-badge.admin {
+  background: #DBEAFE;
+  color: #1E40AF;
+}
+
+.btn-promote-member,
+.btn-demote-member {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition);
+  font-family: inherit;
+  border: 1px solid var(--border-input);
+  background: var(--bg-page);
+  color: var(--text-main);
+}
+
+.btn-promote-member:hover {
+  background: #DBEAFE;
+  color: #1E40AF;
+  border-color: #93C5FD;
+}
+
+.btn-demote-member:hover {
+  background: #F3F4F6;
+  color: #4B5563;
 }
 
 .btn-kick-member {
