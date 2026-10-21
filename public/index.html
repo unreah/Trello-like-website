@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kanban Pro — Управління задачами та командами</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/style.css?v=20261021_5">
 </head>
 <body class="theme-terracotta">
   <div class="app-container">
@@ -300,19 +300,19 @@
   <!-- ==========================================================
        MODAL: ADD COLUMN
        ========================================================== -->
-  <div class="modal-backdrop" id="add-column-modal-backdrop">
+  <div class="modal-backdrop" id="add-column-modal-backdrop" onclick="if(event.target===this)closeModal('add-column-modal-backdrop')">
     <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-labelledby="add-column-modal-title">
       <div class="modal-header">
         <h3 id="add-column-modal-title">Додати нову колонку</h3>
-        <button type="button" class="btn-close-modal modal-close-btn" id="btn-close-add-column-modal" aria-label="Закрити">&times;</button>
+        <button type="button" class="btn-close-modal modal-close-btn" id="btn-close-add-column-modal" onclick="closeModal('add-column-modal-backdrop')" aria-label="Закрити">&times;</button>
       </div>
       <form id="add-column-form" class="modal-form" style="padding: 18px 20px;">
         <div class="form-group">
           <label for="new-column-name-input">Назва колонки *</label>
-          <input type="text" id="new-column-name-input" class="form-input" placeholder="Наприклад: Тестування або Рев'ю" required maxlength="50">
+          <input type="text" id="new-column-name-input" class="form-input" placeholder="Наприклад: Тестування або Рев'ю" required maxlength="50" autocomplete="off">
         </div>
         <div class="modal-actions" style="margin-top: 14px;">
-          <button type="button" class="btn btn-secondary" id="btn-cancel-add-column">Скасувати</button>
+          <button type="button" class="btn btn-secondary" id="btn-cancel-add-column" onclick="closeModal('add-column-modal-backdrop')">Скасувати</button>
           <button type="submit" class="btn btn-primary">Створити колонку</button>
         </div>
       </form>
@@ -322,20 +322,20 @@
   <!-- ==========================================================
        MODAL: EDIT COLUMN
        ========================================================== -->
-  <div class="modal-backdrop" id="edit-column-modal-backdrop">
+  <div class="modal-backdrop" id="edit-column-modal-backdrop" onclick="if(event.target===this)closeModal('edit-column-modal-backdrop')">
     <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-labelledby="edit-column-modal-title">
       <div class="modal-header">
         <h3 id="edit-column-modal-title">Редагувати назву колонки</h3>
-        <button type="button" class="btn-close-modal modal-close-btn" id="btn-close-edit-column-modal" aria-label="Закрити">&times;</button>
+        <button type="button" class="btn-close-modal modal-close-btn" id="btn-close-edit-column-modal" onclick="closeModal('edit-column-modal-backdrop')" aria-label="Закрити">&times;</button>
       </div>
       <form id="edit-column-form" class="modal-form" style="padding: 18px 20px;">
         <input type="hidden" id="edit-column-id-input">
         <div class="form-group">
           <label for="edit-column-name-input">Нова назва колонки *</label>
-          <input type="text" id="edit-column-name-input" class="form-input" required maxlength="50">
+          <input type="text" id="edit-column-name-input" class="form-input" required maxlength="50" autocomplete="off">
         </div>
         <div class="modal-actions" style="margin-top: 14px;">
-          <button type="button" class="btn btn-secondary" id="btn-cancel-edit-column">Скасувати</button>
+          <button type="button" class="btn btn-secondary" id="btn-cancel-edit-column" onclick="closeModal('edit-column-modal-backdrop')">Скасувати</button>
           <button type="submit" class="btn btn-primary">Зберегти зміни</button>
         </div>
       </form>
@@ -345,11 +345,11 @@
   <!-- ==========================================================
        MODAL: QUICK MOVE TASK
        ========================================================== -->
-  <div class="modal-backdrop" id="move-task-modal-backdrop">
+  <div class="modal-backdrop" id="move-task-modal-backdrop" onclick="if(event.target===this)closeModal('move-task-modal-backdrop')">
     <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-labelledby="move-task-modal-title">
       <div class="modal-header">
         <h3 id="move-task-modal-title">Перемістити задачу</h3>
-        <button type="button" class="btn-close-modal modal-close-btn" id="btn-close-move-task-modal" aria-label="Закрити">&times;</button>
+        <button type="button" class="btn-close-modal modal-close-btn" id="btn-close-move-task-modal" onclick="closeModal('move-task-modal-backdrop')" aria-label="Закрити">&times;</button>
       </div>
       <div class="modal-body" style="padding: 18px 20px 22px 20px;">
         <p id="move-task-modal-name" style="font-weight: 700; color: var(--text-main); margin-bottom: 14px; font-size: 15px; word-break: break-word;"></p>
@@ -374,6 +374,6 @@
   <!-- TOAST NOTIFICATIONS -->
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="/js/main.js"></script>
+  <script src="/js/main.js?v=20261021_5"></script>
 </body>
 </html>

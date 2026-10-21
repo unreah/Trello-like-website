@@ -710,9 +710,9 @@ function renderBoardColumns() {
     if (isAdminOrOwner) {
       adminControls = `
         <div class="column-actions-group">
-          <button type="button" class="btn-col-action btn-edit-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" title="Редагувати назву колонки">✏️</button>
+          <button type="button" class="btn-col-action btn-edit-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" onclick="openEditColumnModal(this.dataset.colId, this.dataset.colName)" title="Редагувати назву колонки">✏️</button>
           ${currentColumns.length > 1 ? `
-            <button type="button" class="btn-col-action btn-delete-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" title="Видалити колонку">🗑️</button>
+            <button type="button" class="btn-col-action btn-delete-col" data-col-id="${col.id}" data-col-name="${escapeHtml(col.name)}" onclick="handleDeleteColumn(this.dataset.colId, this.dataset.colName)" title="Видалити колонку">🗑️</button>
           ` : ''}
         </div>
       `;
@@ -753,7 +753,7 @@ function renderBoardColumns() {
   if (isAdminOrOwner) {
     columnsHtml += `
       <div class="add-column-card">
-        <button type="button" class="btn-add-column" id="btn-add-column">
+        <button type="button" class="btn-add-column" id="btn-add-column" onclick="openAddColumnModal()">
           <span>+ Додати колонку</span>
         </button>
       </div>
@@ -774,7 +774,7 @@ function renderBoardColumns() {
     }).join("");
     if (isAdminOrOwner) {
       tabsHtml += `
-        <button class="mobile-board-tab mobile-add-col-tab" id="mob-btn-add-column" type="button" title="Додати нову колонку">
+        <button class="mobile-board-tab mobile-add-col-tab" id="mob-btn-add-column" type="button" onclick="openAddColumnModal()" title="Додати нову колонку">
           ➕ Нова колонка
         </button>
       `;
@@ -844,51 +844,26 @@ function renderBoardColumns() {
 
   // 6. Bind Column Admin Action Listeners
   if (isAdminOrOwner) {
-    // Add column button (desktop board card + mobile tab button)
-    const openAddColHandler = () => {
-      document.getElementById("new-column-name-input").value = "";
-      openModal("add-column-modal-backdrop");
-    };
-    document.getElementById("btn-add-column")?.addEventListener("click", openAddColHandler);
-    document.getElementById("mob-btn-add-column")?.addEventListener("click", openAddColHandler);
+    document.getElementById("btn-add-column")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openAddColumnModal();
+    });
+    document.getElementById("mob-btn-add-column")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openAddColumnModal();
+    });
 
-    // Edit column buttons
     board.querySelectorAll(".btn-edit-col").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const colId = btn.dataset.colId;
-        const colName = btn.dataset.colName;
-        document.getElementById("edit-column-id-input").value = colId;
-        document.getElementById("edit-column-name-input").value = colName;
-        openModal("edit-column-modal-backdrop");
+        openEditColumnModal(btn.dataset.colId, btn.dataset.colName);
       });
     });
 
-    // Delete column buttons
     board.querySelectorAll(".btn-delete-col").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
+      btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const colId = btn.dataset.colId;
-        const colName = btn.dataset.colName;
-
-        if (!confirm(`Видалити колонку "${colName}"? Усі задачі з цієї колонки будуть автоматично перенесені в іншу колонку.`)) {
-          return;
-        }
-
-        const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
-        try {
-          const res = await fetch(`/api/columns/${colId}?teamId=${teamParam}`, { method: "DELETE" });
-          const data = await res.json();
-          if (data.success) {
-            showToast(`Колонку "${colName}" успішно видалено!`, "success");
-            await loadBoardColumns();
-            await loadTasks();
-          } else {
-            showToast(data.error || "Не вдалося видалити колонку", "error");
-          }
-        } catch (err) {
-          showToast("Помилка зв'язку із сервером", "error");
-        }
+        handleDeleteColumn(btn.dataset.colId, btn.dataset.colName);
       });
     });
   }
@@ -1676,10 +1651,117 @@ async function deleteTask(taskId) {
    MODALS & EVENT BINDINGS
    ========================================================== */
 
+function openAddColumnModal() {
+  const modal = document.getElementById("add-column-modal-backdrop");
+  if (!modal) {
+    const colName = prompt("Введіть назву нової колонки:");
+    if (colName && colName.trim()) {
+      createColumnDirectly(colName.trim());
+    }
+    return;
+  }
+  const input = document.getElementById("new-column-name-input");
+  if (input) input.value = "";
+  openModal("add-column-modal-backdrop");
+  setTimeout(() => {
+    document.getElementById("new-column-name-input")?.focus();
+  }, 60);
+}
+
+function openEditColumnModal(colId, colName) {
+  const modal = document.getElementById("edit-column-modal-backdrop");
+  if (!modal) {
+    const newName = prompt("Введіть нову назву колонки:", colName);
+    if (newName && newName.trim() && newName.trim() !== colName) {
+      editColumnDirectly(colId, newName.trim());
+    }
+    return;
+  }
+  const idInput = document.getElementById("edit-column-id-input");
+  const nameInput = document.getElementById("edit-column-name-input");
+  if (idInput) idInput.value = colId;
+  if (nameInput) nameInput.value = colName || "";
+  openModal("edit-column-modal-backdrop");
+  setTimeout(() => {
+    document.getElementById("edit-column-name-input")?.focus();
+  }, 60);
+}
+
+async function handleDeleteColumn(colId, colName) {
+  if (!confirm(`Видалити колонку "${colName}"? Усі задачі з цієї колонки будуть автоматично перенесені в іншу колонку.`)) {
+    return;
+  }
+
+  const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
+  try {
+    const res = await fetch(`/api/columns/${colId}?teamId=${teamParam}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Колонку "${colName}" успішно видалено!`, "success");
+      await loadBoardColumns();
+      await loadTasks();
+    } else {
+      showToast(data.error || "Не вдалося видалити колонку", "error");
+    }
+  } catch (err) {
+    showToast("Помилка зв'язку із сервером", "error");
+  }
+}
+
+async function createColumnDirectly(name) {
+  const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
+  try {
+    const res = await fetch("/api/columns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamId: teamParam, name })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal("add-column-modal-backdrop");
+      showToast(`Колонку "${name}" успішно створено!`, "success");
+      await loadBoardColumns();
+      await loadTasks();
+    } else {
+      showToast(data.error || "Помилка додавання колонки", "error");
+    }
+  } catch (err) {
+    showToast("Помилка зв'язку із сервером", "error");
+  }
+}
+
+async function editColumnDirectly(colId, name) {
+  const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
+  try {
+    const res = await fetch(`/api/columns/${colId}?teamId=${teamParam}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal("edit-column-modal-backdrop");
+      showToast(`Назву колонки змінено на "${name}"`, "success");
+      await loadBoardColumns();
+      await loadTasks();
+    } else {
+      showToast(data.error || "Помилка редагування колонки", "error");
+    }
+  } catch (err) {
+    showToast("Помилка зв'язку із сервером", "error");
+  }
+}
+
 function openModal(id) {
   const modal = document.getElementById(id);
-  if (!modal) return;
+  if (!modal) {
+    console.error("Modal not found for id:", id);
+    return;
+  }
   modal.style.display = "flex";
+  modal.style.opacity = "1";
+  modal.style.visibility = "visible";
+  modal.style.pointerEvents = "auto";
   void modal.offsetWidth;
   modal.classList.add("active");
 }
@@ -1688,12 +1770,20 @@ function closeModal(id) {
   const modal = document.getElementById(id);
   if (!modal) return;
   modal.classList.remove("active");
-  setTimeout(() => {
-    if (!modal.classList.contains("active")) {
-      modal.style.display = "none";
-    }
-  }, 220);
+  modal.style.opacity = "0";
+  modal.style.visibility = "hidden";
+  modal.style.pointerEvents = "none";
+  modal.style.display = "none";
 }
+
+// Expose modal helpers globally to window
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.openAddColumnModal = openAddColumnModal;
+window.openEditColumnModal = openEditColumnModal;
+window.handleDeleteColumn = handleDeleteColumn;
+window.createColumnDirectly = createColumnDirectly;
+window.editColumnDirectly = editColumnDirectly;
 
 function openAuthModal() {
   const err = document.getElementById("auth-error-msg");
@@ -1896,6 +1986,30 @@ function setupEventListeners() {
     if (e.target.id === "move-task-modal-backdrop") closeModal("move-task-modal-backdrop");
   });
 
+  // Global event delegation for Column buttons (Add, Edit, Delete)
+  document.addEventListener("click", (e) => {
+    const addBtn = e.target.closest("#btn-add-column, #mob-btn-add-column, .btn-add-column, .mobile-add-col-tab");
+    if (addBtn) {
+      e.preventDefault();
+      openAddColumnModal();
+      return;
+    }
+
+    const editBtn = e.target.closest(".btn-edit-col");
+    if (editBtn) {
+      e.preventDefault();
+      openEditColumnModal(editBtn.dataset.colId, editBtn.dataset.colName);
+      return;
+    }
+
+    const delBtn = e.target.closest(".btn-delete-col");
+    if (delBtn) {
+      e.preventDefault();
+      handleDeleteColumn(delBtn.dataset.colId, delBtn.dataset.colName);
+      return;
+    }
+  });
+
   // Add Column Modal events
   document.getElementById("btn-close-add-column-modal")?.addEventListener("click", () => closeModal("add-column-modal-backdrop"));
   document.getElementById("btn-cancel-add-column")?.addEventListener("click", () => closeModal("add-column-modal-backdrop"));
@@ -1906,26 +2020,7 @@ function setupEventListeners() {
     e.preventDefault();
     const name = document.getElementById("new-column-name-input").value.trim();
     if (!name) return;
-
-    const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
-    try {
-      const res = await fetch("/api/columns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamId: teamParam, name })
-      });
-      const data = await res.json();
-      if (data.success) {
-        closeModal("add-column-modal-backdrop");
-        showToast(`Колонку "${name}" успішно створено!`, "success");
-        await loadBoardColumns();
-        await loadTasks();
-      } else {
-        showToast(data.error || "Помилка додавання колонки", "error");
-      }
-    } catch (err) {
-      showToast("Помилка зв'язку із сервером", "error");
-    }
+    await createColumnDirectly(name);
   });
 
   // Edit Column Modal events
@@ -1939,26 +2034,7 @@ function setupEventListeners() {
     const colId = document.getElementById("edit-column-id-input").value;
     const name = document.getElementById("edit-column-name-input").value.trim();
     if (!name || !colId) return;
-
-    const teamParam = (currentWorkspace && currentWorkspace.type === "team") ? currentWorkspace.id : "solo";
-    try {
-      const res = await fetch(`/api/columns/${colId}?teamId=${teamParam}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
-      });
-      const data = await res.json();
-      if (data.success) {
-        closeModal("edit-column-modal-backdrop");
-        showToast(`Назву колонки змінено на "${name}"`, "success");
-        await loadBoardColumns();
-        await loadTasks();
-      } else {
-        showToast(data.error || "Помилка редагування колонки", "error");
-      }
-    } catch (err) {
-      showToast("Помилка зв'язку із сервером", "error");
-    }
+    await editColumnDirectly(colId, name);
   });
 
   // Close any open modal on Escape key
