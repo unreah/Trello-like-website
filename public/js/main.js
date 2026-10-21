@@ -661,13 +661,35 @@ async function loadBoardColumns() {
 
 function getColumnIcon(statusKey, colName = "") {
   const lower = (statusKey + " " + colName).toLowerCase();
-  if (lower.includes("todo") || lower.includes("викон")) return "📋";
-  if (lower.includes("in-progress") || lower.includes("процес") || lower.includes("робот")) return "⚡";
-  if (lower.includes("done") || lower.includes("заверш") || lower.includes("готов")) return "✅";
+  // Check completed / done first to avoid "виконано" matching "викон"
+  if (lower.includes("done") || lower.includes("заверш") || lower.includes("готов") || lower.includes("виконано")) return "✅";
+  if (lower.includes("in-progress") || lower.includes("процес") || lower.includes("робот") || lower.includes("роб")) return "⚡";
+  if (lower.includes("todo") || lower.includes("до викон") || lower.includes("черг") || lower.includes("план") || lower.includes("викон")) return "📋";
   if (lower.includes("test") || lower.includes("тест")) return "🧪";
   if (lower.includes("review") || lower.includes("рев")) return "👀";
   if (lower.includes("block") || lower.includes("блок")) return "⛔";
   return "📌";
+}
+
+function getDoneColumn() {
+  if (!currentColumns || currentColumns.length === 0) return null;
+  // 1. Check explicit done status keys
+  const byKey = currentColumns.find(c => c.status_key === "done" || c.status_key === "completed" || c.status_key === "finished");
+  if (byKey) return byKey;
+
+  // 2. By column name match: "виконано", "завершено", "готово", "done", explicitly excluding "до викон" / "todo"
+  const byName = currentColumns.find(c => {
+    const name = (c.name || "").toLowerCase().trim();
+    if (name.includes("до викон") || name.includes("todo")) return false;
+    return name.includes("виконано") || name.includes("заверш") || name.includes("готов") || name.includes("done");
+  });
+  if (byName) return byName;
+
+  // 3. Fallback: last column if more than 1 column
+  if (currentColumns.length > 1) {
+    return currentColumns[currentColumns.length - 1];
+  }
+  return currentColumns[0];
 }
 
 function renderBoardColumns() {
@@ -861,6 +883,11 @@ function renderBoardColumns() {
       });
     });
   }
+
+  // Re-render tasks into freshly created dropzones if tasks are already loaded
+  if (allTasks && allTasks.length > 0) {
+    renderBoard();
+  }
 }
 
 /* ==========================================================
@@ -994,12 +1021,17 @@ function renderBoard() {
 
   // Distribute tasks into columns
   filteredTasks.forEach(task => {
-    if (counts[task.status] !== undefined) {
-      counts[task.status]++;
+    let targetDropzone = document.getElementById(`dropzone-${task.status}`);
+    let taskStatus = task.status;
+    if (!targetDropzone && currentColumns.length > 0) {
+      taskStatus = currentColumns[0].status_key;
+      targetDropzone = document.getElementById(`dropzone-${taskStatus}`);
     }
-    const col = document.getElementById(`dropzone-${task.status}`);
-    if (col) {
-      col.appendChild(createTaskCardElement(task));
+    if (counts[taskStatus] !== undefined) {
+      counts[taskStatus]++;
+    }
+    if (targetDropzone) {
+      targetDropzone.appendChild(createTaskCardElement(task));
     }
   });
 
@@ -1359,7 +1391,7 @@ function setupDragAndDrop() {
 
 function updateDashboardStats(tasks) {
   const total = tasks.length;
-  const doneColumn = currentColumns.find(c => c.status_key === "done" || c.name.toLowerCase().includes("викон"));
+  const doneColumn = getDoneColumn();
   const doneStatus = doneColumn ? doneColumn.status_key : "done";
   const doneCount = tasks.filter(t => t.status === doneStatus).length;
   const pct = total === 0 ? 0 : Math.round((doneCount / total) * 100);
@@ -1467,6 +1499,20 @@ function openCreateTaskModal() {
     updateAssigneesChecklistState(false);
   }
 
+  // Populate column selector
+  const colSelect = document.getElementById("task-column-select");
+  if (colSelect) {
+    colSelect.innerHTML = currentColumns.map(col => `
+      <option value="${col.status_key}">${getColumnIcon(col.status_key, col.name)} ${escapeHtml(col.name)}</option>
+    `).join("");
+    const activeTab = document.querySelector(".mobile-board-tab.active")?.dataset.col;
+    if (activeTab && currentColumns.some(c => c.status_key === activeTab)) {
+      colSelect.value = activeTab;
+    } else if (currentColumns[0]) {
+      colSelect.value = currentColumns[0].status_key;
+    }
+  }
+
   // Check current user by default in checklist
   const checklist = document.getElementById("task-assignees-checklist");
   if (checklist) {
@@ -1500,6 +1546,15 @@ function openEditTaskModal(task) {
   if (assignAllCb) {
     assignAllCb.checked = Boolean(task.is_all_assignees);
     updateAssigneesChecklistState(task.is_all_assignees);
+  }
+
+  // Populate column selector
+  const colSelect = document.getElementById("task-column-select");
+  if (colSelect) {
+    colSelect.innerHTML = currentColumns.map(col => `
+      <option value="${col.status_key}" ${col.status_key === task.status ? 'selected' : ''}>${getColumnIcon(col.status_key, col.name)} ${escapeHtml(col.name)}</option>
+    `).join("");
+    colSelect.value = task.status;
   }
 
   const checklist = document.getElementById("task-assignees-checklist");
@@ -1538,6 +1593,9 @@ async function handleTaskFormSubmit(e) {
     assigneeIds.push(Number(cb.value));
   });
 
+  const colSelect = document.getElementById("task-column-select");
+  const selectedStatus = colSelect ? colSelect.value : (currentColumns[0]?.status_key || "todo");
+
   const teamParam = (currentWorkspace && currentWorkspace.type === "team")
     ? currentWorkspace.id
     : null;
@@ -1552,6 +1610,7 @@ async function handleTaskFormSubmit(e) {
         body: JSON.stringify({
           title,
           description,
+          status: selectedStatus,
           difficulty,
           tags,
           assigneeIds,
@@ -1559,15 +1618,14 @@ async function handleTaskFormSubmit(e) {
         })
       });
     } else {
-      // Create task (default to first column)
-      const defaultStatus = currentColumns[0]?.status_key || "todo";
+      // Create task (default to selected column)
       res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
           description,
-          status: defaultStatus,
+          status: selectedStatus,
           difficulty,
           tags,
           assigneeIds,

@@ -23,7 +23,7 @@
         <!-- Workspace Switcher (Slack style) -->
         <div class="workspace-switcher-wrapper" id="workspace-switcher-wrapper" style="display:none;">
           <button class="workspace-pill-btn" id="btn-workspace-switch" title="Змінити робоче середовище або вийти в особистий простір">
-            <span class="workspace-icon" id="current-ws-icon">🏢</span>
+            <span class="workspace-icon" id="current-ws-icon">👤</span>
             <div class="workspace-pill-text">
               <span class="workspace-label">ПРОСТІР</span>
               <span class="workspace-name" id="current-ws-name">Особистий</span>
@@ -136,6 +136,11 @@
         <div class="form-group">
           <label for="task-desc-input">Детальний опис</label>
           <textarea id="task-desc-input" class="form-textarea" placeholder="Додаткові деталі, посилання чи критерії..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="task-column-select">Колонка *</label>
+          <select id="task-column-select" class="form-select"></select>
         </div>
 
         <div class="form-group">

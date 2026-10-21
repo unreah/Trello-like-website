@@ -825,7 +825,8 @@ export function updateTask(id, {
   difficulty,
   tags,
   assigneeIds,
-  isAllAssignees
+  isAllAssignees,
+  status
 }) {
   const task = getTaskById(id);
   if (!task) {
@@ -850,13 +851,15 @@ export function updateTask(id, {
     ? JSON.stringify(Array.isArray(tags) ? tags.map(t => String(t).trim()).filter(Boolean) : [])
     : JSON.stringify(task.tags);
 
+  const newStatus = status !== undefined && status.trim() ? status.trim() : task.status;
+
   const now = new Date().toISOString();
   const stmt = db.prepare(`
     UPDATE tasks
-    SET title = ?, description = ?, difficulty = ?, tags = ?, is_all_assignees = ?, updated_at = ?
+    SET title = ?, description = ?, difficulty = ?, tags = ?, is_all_assignees = ?, status = ?, updated_at = ?
     WHERE id = ?
   `);
-  stmt.run(newTitle, newDesc, newDiff, newTags, newIsAll, now, id);
+  stmt.run(newTitle, newDesc, newDiff, newTags, newIsAll, newStatus, now, id);
 
   if (assigneeIds !== undefined && Array.isArray(assigneeIds)) {
     db.prepare('DELETE FROM task_assignees WHERE task_id = ?').run(id);

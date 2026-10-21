@@ -493,7 +493,7 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
       });
     }
 
-    const { title, description, difficulty, tags, assigneeIds, assigneeId, isAllAssignees } = req.body || {};
+    const { title, description, difficulty, tags, assigneeIds, assigneeId, isAllAssignees, status } = req.body || {};
     let finalAssigneeIds = undefined;
     if (Array.isArray(assigneeIds)) {
       finalAssigneeIds = assigneeIds;
@@ -507,7 +507,8 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
       difficulty,
       tags,
       assigneeIds: finalAssigneeIds,
-      isAllAssignees
+      isAllAssignees,
+      status
     });
 
     res.json({ success: true, task: updated });
