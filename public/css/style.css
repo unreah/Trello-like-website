@@ -542,13 +542,13 @@ body {
   flex: 0 0 320px;
   width: 320px;
   max-width: 320px;
+  height: clamp(520px, calc(100vh - 270px), 780px);
   background: var(--card-bg);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  min-height: 520px;
   overflow: hidden;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
@@ -597,6 +597,7 @@ body {
   align-items: center;
   padding: 16px 18px 12px 18px;
   border-bottom: 1px solid rgba(0,0,0,0.05);
+  flex-shrink: 0;
 }
 
 .column-title-group {
@@ -662,6 +663,7 @@ body {
 /* Inline Quick Add Task Box */
 .quick-add-task-box {
   padding: 0 12px 10px 12px;
+  flex-shrink: 0;
 }
 
 .quick-add-task-form {
@@ -750,14 +752,38 @@ body {
 }
 
 .column-dropzone {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 440px;
   transition: background-color 0.2s ease, border 0.2s ease;
   border-radius: 0 0 var(--radius-card) var(--radius-card);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-input) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.column-dropzone::-webkit-scrollbar {
+  width: 6px;
+}
+
+.column-dropzone::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.column-dropzone::-webkit-scrollbar-thumb {
+  background: var(--border-input);
+  border-radius: 4px;
+}
+
+.column-dropzone::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 
 .column-dropzone.drag-over {
@@ -770,7 +796,7 @@ body {
   text-align: center;
   color: var(--text-subtle);
   font-size: 13px;
-  margin-top: 50px;
+  margin: auto 0;
   padding: 20px;
 }
 
@@ -779,6 +805,7 @@ body {
    ========================================================== */
 
 .task-card {
+  flex-shrink: 0;
   background: #FFFFFF;
   border-radius: 12px;
   padding: 14px;
@@ -2235,11 +2262,13 @@ body {
   }
 
   .kanban-column {
-    flex: 0 0 82%;
-    max-width: 330px;
-    min-height: 380px;
+    flex: 0 0 84%;
+    max-width: 340px;
+    height: clamp(420px, calc(100vh - 240px), 640px);
     scroll-snap-align: center;
     border-radius: 14px;
+    display: flex;
+    flex-direction: column;
   }
 
   .task-quick-moves {
@@ -2265,9 +2294,14 @@ body {
   }
 
   .column-dropzone {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
     padding: 10px;
-    min-height: 220px;
     gap: 10px;
+    -webkit-overflow-scrolling: touch;
   }
 
   .task-card {
